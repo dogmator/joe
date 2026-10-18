@@ -183,3 +183,15 @@ def test_balance_refresh_uses_usage_cache_and_does_not_change_provider_readiness
         assert status["balance"]["available"] is False
         assert status["windows"] == []
     assert len(calls) == 2
+
+
+def test_account_balance_does_not_depend_on_codex_installation(credentials, monkeypatch):
+    from joe import usage
+
+    calls = respond(monkeypatch, payload())
+    monkeypatch.setattr("joe.providers.resolve_executable", lambda name: None)
+    status = usage._deepseek_status()
+    assert not status["available"]
+    assert status["balance"]["balance_usd"] == 4.5
+    assert status["quota_display"] == "token_billing"
+    assert len(calls) == 1

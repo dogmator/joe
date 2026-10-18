@@ -58,6 +58,8 @@ def usage_status(force: bool = False) -> list[dict[str, Any]]:
         _refresh_claude_status() if force else _claude_status(),
         {
             "provider": "antigravity",
+            "quota_display": "cli_unsupported",
+            "installed": antigravity_installed,
             "available": antigravity_installed,
             "availability_state": (
                 "quota_unknown" if antigravity_installed else "unavailable"
@@ -70,10 +72,10 @@ def usage_status(force: bool = False) -> list[dict[str, Any]]:
                 else "Antigravity CLI non installée"
             ),
         },
-        _unavailable(
-            "copilot",
-            "Disponible uniquement dans la session interactive Copilot",
-        ),
+        {
+            **_unavailable("copilot", "Disponible uniquement dans la session interactive Copilot"),
+            "quota_display": "interactive_only", "installed": bool(shutil.which("copilot")),
+        },
         _deepseek_status(),
     ]
     with _lock:
@@ -96,10 +98,12 @@ def _deepseek_status() -> dict[str, Any]:
     issue = setup_error()
     installed = bool(resolve_executable("deepseek"))
     return {
-        "provider": "deepseek", "available": installed and issue is None,
+        "provider": "deepseek", "label": "DeepSeek",
+        "quota_display": "token_billing", "installed": installed, "setup_required": issue,
+        "available": installed and issue is None,
         "availability_state": "quota_unknown" if installed and issue is None else "unavailable",
         "plan": "DeepSeek API", "windows": [],
-        "balance": fetch_deepseek_balance() if installed and issue is None else None,
+        "balance": fetch_deepseek_balance(),
         "message": issue or ("DeepSeek API: solde et reprise inconnus, facturation par token"
                              if installed else "Codex CLI non installée"),
     }
