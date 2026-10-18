@@ -672,7 +672,7 @@ function providerRow(provider, interactive) {
   // Personne n'installe cinq CLI : sans savoir a quoi chacune sert, choisir
   // revient a deviner. Le texte reprend la doctrine de routage de Joe.
   const purpose = t(`provider_purpose_${provider.provider.replace(/-/g, "_")}`);
-  if (!provider.installed && purpose) {
+  if ((!provider.installed || provider.manual_only) && purpose) {
     const role = document.createElement("small");
     role.className = "provider-purpose";
     role.textContent = purpose;
