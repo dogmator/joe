@@ -224,6 +224,7 @@ class LiveRun:
     finished_at: float | None = None
     not_before: float | None = None
     defer_count: int = 0
+    requested_reviewer: str | None = None
 
     def emit(self, event: dict[str, Any]) -> None:
         with self.condition:
@@ -308,6 +309,7 @@ class RunManager:
         execution_mode: str | None,
         attachments: list[str] | None = None,
         *,
+        reviewer: str | None = None,
         run_id: str | None = None,
         resumed: bool = False,
         classification: RouteClassification | None = None,
@@ -332,6 +334,7 @@ class RunManager:
                 effort,
                 execution_mode,
                 classification=classification,
+                reviewer=reviewer,
                 plan_stage=plan_stage,
             )
         workspace, _, _, _ = self._project_scope(conversation_id)
@@ -364,6 +367,7 @@ class RunManager:
             git_before=snapshot(workspace),
             not_before=not_before,
             defer_count=defer_count,
+            requested_reviewer=reviewer,
         )
         self.tasks.create(
             run_id,
@@ -615,6 +619,7 @@ class RunManager:
         effort: str | None = None,
         execution_mode: str | None = None,
         *,
+        reviewer: str | None = None,
         classification: RouteClassification | None = None,
         local_action: str = "",
         local_payload: dict[str, Any] | None = None,
@@ -664,7 +669,7 @@ class RunManager:
 
         if classification is None and os.environ.get(
             "JOE_DISABLE_LLM_ROUTER"
-        ) != "1":
+        ) != "1" and not reviewer:
             orchestrator = Orchestrator(
                 workspace,
                 additional_roots=additional_roots,
@@ -691,6 +696,7 @@ class RunManager:
             cached_usage_status(),
             forced_agent=effective_agent,
             forced_mode=forced_mode,
+            forced_reviewer=reviewer,
             previous_provider=previous,
             classification=classification,
             wait_for_provider=wait_for_provider,
@@ -805,6 +811,7 @@ class RunManager:
                     model,
                     effort,
                     execution_mode,
+                    reviewer=run.requested_reviewer,
                 )
             route = decision.route
             classification = decision.classification
@@ -2580,6 +2587,7 @@ class RunManager:
             "request": run.request,
             "conversation_id": run.conversation_id,
             "agent": agent,
+            "reviewer": run.requested_reviewer,
             "mode": mode,
             "model": model,
             "effort": effort,
@@ -2629,6 +2637,7 @@ class RunManager:
                 item.get("attachments") or [],
                 run_id=run_id,
                 resumed=True,
+                reviewer=item.get("reviewer"),
                 not_before=item.get("not_before"),
                 defer_count=int(item.get("defer_count", 0)),
                 language=str(item.get("language", "fr")),

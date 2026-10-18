@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
 
 const require = createRequire(import.meta.url);
 const { authenticatedFetch, pairBrowser } = require(
@@ -497,4 +498,40 @@ test("deleting the open conversation opens a blank tab, not an old one", async (
 
   assert.ok(appels.includes("POST /api/conversations"));
   assert.notEqual(state.activeConversationId, "ancienne");
+});
+
+
+test("reviewer selection is preserved in conversation settings and queued run payloads", () => {
+  const source = readFileSync(new URL("../src/joe/web_assets/app.js", import.meta.url), "utf8");
+  const controls = {
+    agent: { value: "codex" }, reviewer: { value: "deepseek" },
+    mode: { value: "review" }, model: { value: "gpt-fixture" },
+    effort: { value: "xhigh" }, "tool-web-access": { checked: true },
+    "tool-plan-first": { checked: false }
+  };
+  const context = vm.createContext({ $: id => controls[id], selectedFileIds: [] });
+  for (const [name, next] of [["currentSettings", "applySettings"], ["currentRunSettings", "enqueueRequest"]]) {
+    const code = source.slice(source.indexOf(`function ${name}(`), source.indexOf(`function ${next}(`));
+    vm.runInContext(code, context);
+    const settings = vm.runInContext(`${name}()`, context);
+    assert.equal(settings.reviewer, "deepseek");
+    assert.equal(settings.agent, "codex");
+    assert.equal(settings.model, "gpt-fixture");
+  }
+  const handlers = {};
+  let saves = 0;
+  context.saveSettings = () => saves++;
+  context.refreshSelectMenu = () => {};
+  for (const id of ["reviewer", "mode", "effort"]) {
+    controls[id].addEventListener = (event, handler) => { handlers[id] = handler; };
+  }
+  vm.runInContext(source.slice(source.indexOf('$("reviewer").addEventListener'),
+    source.indexOf('$("effort").addEventListener')), context);
+  controls.mode.value = "fast";
+  handlers.reviewer();
+  assert.equal(controls.mode.value, "review");
+  controls.mode.value = "consensus";
+  handlers.mode();
+  assert.equal(controls.reviewer.value, "");
+  assert.equal(saves, 2);
 });

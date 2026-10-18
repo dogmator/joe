@@ -53,6 +53,7 @@ def _ai_access(value: Any, legacy: Any = None) -> str:
 
 DEFAULT_SETTINGS = {
     "agent": "",
+    "reviewer": "",
     "mode": "",
     "model": "",
     "effort": "",
@@ -815,6 +816,9 @@ class ConversationStore:
             settings = conversation.setdefault("settings", dict(DEFAULT_SETTINGS))
             if settings.get("agent", "") not in _VALID_AGENTS:
                 settings["agent"] = ""
+            settings.setdefault("reviewer", "")
+            if settings["reviewer"] not in _VALID_AGENTS:
+                settings["reviewer"] = ""
             conversation.setdefault(
                 "last_call_at",
                 conversation.get("updated_at", conversation.get("created_at", 0)),

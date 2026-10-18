@@ -142,6 +142,14 @@ function updateProviderMenu(providers) {
   // `setOptions` a rafraîchi le menu visible avant que la valeur ne soit
   // remise : sans ce second passage, l'affichage contredit la sélection.
   refreshSelectMenu($("agent"));
+  const reviewer = $("reviewer").value;
+  setOptions($("reviewer"), [
+    { id: "", label: t("automatic") }, ...providerMenuItems(providers, reviewer)
+  ]);
+  if ([...$("reviewer").options].some(option => option.value === reviewer)) {
+    $("reviewer").value = reviewer;
+  }
+  refreshSelectMenu($("reviewer"));
   // Le modèle dépend de l'agent : si la reconstruction a perdu la sélection,
   // la liste des modèles doit suivre au lieu de rester sur l'ancienne.
   if ($("agent").value !== selected) updateCapabilityMenus();
@@ -1097,6 +1105,7 @@ function updateEfforts() {
 function currentSettings() {
   return {
     agent: $("agent").value,
+    reviewer: $("reviewer").value,
     mode: $("mode").value,
     model: $("model").value,
     effort: $("effort").value,
@@ -1111,11 +1120,12 @@ function applySettings(settings) {
     $("model").value = settings.model;
   }
   updateEfforts();
-  $("mode").value = settings.mode || "";
+  $("reviewer").value = settings.reviewer || "";
+  $("mode").value = $("reviewer").value ? "review" : (settings.mode || "");
   $("effort").value = settings.effort || "";
   $("tool-web-access").checked = settings.web_access !== "off";
   for (const select of [
-    $("agent"), $("mode"), $("model"), $("effort")
+    $("agent"), $("reviewer"), $("mode"), $("model"), $("effort")
   ]) {
     refreshSelectMenu(select);
   }
@@ -1825,6 +1835,7 @@ function currentRunSettings() {
   }
   return {
     agent: $("agent").value,
+    reviewer: $("reviewer").value,
     mode: $("mode").value,
     model,
     effort: $("effort").value,
@@ -2181,7 +2192,20 @@ $("model").addEventListener("change", () => {
   updateEfforts();
   saveSettings();
 });
-$("mode").addEventListener("change", saveSettings);
+$("reviewer").addEventListener("change", () => {
+  if ($("reviewer").value) {
+    $("mode").value = "review";
+    refreshSelectMenu($("mode"));
+  }
+  saveSettings();
+});
+$("mode").addEventListener("change", () => {
+  if ($("mode").value !== "review") {
+    $("reviewer").value = "";
+    refreshSelectMenu($("reviewer"));
+  }
+  saveSettings();
+});
 $("effort").addEventListener("change", saveSettings);
 $("tool-web-access").addEventListener("change", saveSettings);
 $("task-filter").addEventListener("change", renderTasks);
