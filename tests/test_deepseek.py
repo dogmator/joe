@@ -455,19 +455,22 @@ def test_spawn_failure_never_exposes_profile_key_in_an_exception(profile, tmp_pa
     assert "test-deepseek-key" not in result.stderr + json.dumps(result.metadata())
 
 
-def test_json_escaped_key_is_redacted_from_stream_events_and_metadata(profile, tmp_path):
+@pytest.mark.parametrize("encoding", ["json", "url"])
+def test_encoded_key_is_redacted_from_stream_events_and_metadata(profile, tmp_path, encoding):
+    from urllib.parse import quote
     secret = 'test-token-with-"quote\\slash'
     (profile.parent / "credentials.json").write_text(json.dumps({"api_key": secret}))
+    emitted = quote(secret, safe="") if encoding == "url" else secret
     provider = jsonl_provider(tmp_path, [
-        {"type": "item.started", "item": {"type": "command_execution", "command": "echo " + secret}},
-        {"type": "turn.failed", "error": {"message": "unexpected status 401: " + secret}},
+        {"type": "item.started", "item": {"type": "command_execution", "command": "echo " + emitted}},
+        {"type": "turn.failed", "error": {"message": "unexpected status 401: " + emitted}},
     ], 1)
     events = []
     result = provider.run("hello", tmp_path, Intent.ANSWER, 3,
                           on_stream=lambda stream, text: events.append((stream, text)))
     observed = [result.stdout, result.stderr, result.error_message or "", json.dumps(result.metadata())]
     observed.extend(json.loads(value).get("detail", "") for stream, value in events if stream == "activity")
-    assert not any(secret in value for value in observed)
+    assert not any(secret in value or emitted in value for value in observed)
     assert "[REDACTED]" in result.error_message
 
 
