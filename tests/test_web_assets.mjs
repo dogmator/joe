@@ -18,6 +18,21 @@ globalThis.document = globalThis.document || {
 require("../src/joe/web_assets/markdown.js");
 const { window } = globalThis;
 const katex = require("../src/joe/web_assets/katex.min.js");
+require("../src/joe/web_assets/app_usage.js");
+
+test("DeepSeek cost is visibly an API estimate and inclusive tokens are not added twice", () => {
+  const usage = window.createJoeUsage({
+    state: {}, translate: (key, params) => translate("en", key, params)
+  });
+  const description = usage.usageDescription({
+    provider: "deepseek", input_tokens: 100, output_tokens: 10,
+    cache_read_tokens: 40, reasoning_tokens: 3, total_tokens: 110,
+    cost_usd: 0.00003, cost_status: "estimated_deepseek_api"
+  });
+  assert.match(description, /DeepSeek.*estimate.*peak/i);
+  assert.match(description, /110 tokens/);
+  assert.match(description, /\$0\.000030/);
+});
 
 test("uses automatic AI access for new and legacy project dialogs", () => {
   const source = readFileSync(

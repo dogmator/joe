@@ -2,6 +2,13 @@ window.createJoeUsage = function createJoeUsage({
   state, $, escapeHtml, capitalize, addMessage, translate, fetcher
 }) {
   const tr = (key, params) => translate ? translate(key, params) : key;
+  function usageDescription(usage) {
+    const tokens = usage.total_tokens ?? ((usage.input_tokens || 0) + (usage.output_tokens || 0));
+    if (usage.cost_status === "estimated_deepseek_api" && typeof usage.cost_usd === "number") {
+      return tr("deepseek_usage_estimate", { cost: usage.cost_usd.toFixed(6), tokens });
+    }
+    return tr("usage_tokens_count", { tokens });
+  }
   async function loadUsage(force = false) {
     const button = $("refresh-usage");
     if (force) {
@@ -127,6 +134,7 @@ window.createJoeUsage = function createJoeUsage({
   }
 
   return {
+    usageDescription,
     formatPercent,
     loadUsage,
     renderUsage,

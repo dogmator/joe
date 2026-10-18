@@ -13,7 +13,7 @@ from typing import Any
 from . import __version__
 from .models import Mode, Route
 from .provider_health import apply_cooldowns
-from .provider_registry import counterpart, usage_providers
+from .provider_registry import counterpart, usage_providers, get_provider_spec
 from .usage_claude import (
     claude_account_plan as _claude_account_plan,
     claude_reset_timestamp as _claude_reset_timestamp,
@@ -51,7 +51,7 @@ def usage_status(force: bool = False) -> list[dict[str, Any]]:
     global _cache
     with _lock:
         if not force and _cache and time.monotonic() - _cache[0] < _CACHE_SECONDS:
-            return _cache[1]
+            return apply_cooldowns(_cache[1])
     antigravity_installed = bool(shutil.which("agy"))
     fresh = [
         _codex_status(),
@@ -74,6 +74,7 @@ def usage_status(force: bool = False) -> list[dict[str, Any]]:
             "copilot",
             "Disponible uniquement dans la session interactive Copilot",
         ),
+        _deepseek_status(),
     ]
     with _lock:
         providers = [_with_last_available(item) for item in fresh]
@@ -85,6 +86,22 @@ def cached_usage_status() -> list[dict[str, Any]]:
     """Return quota data immediately without probing provider CLIs."""
     with _lock:
         return apply_cooldowns(list(_cache[1])) if _cache else []
+
+
+def _deepseek_status() -> dict[str, Any]:
+    # API balance is not a Codex subscription window. Never probe a paid model.
+    from .deepseek_profile import setup_error
+    from .providers import resolve_executable
+
+    issue = setup_error()
+    installed = bool(resolve_executable("deepseek"))
+    return {
+        "provider": "deepseek", "available": installed and issue is None,
+        "availability_state": "quota_unknown" if installed and issue is None else "unavailable",
+        "plan": "DeepSeek API", "windows": [],
+        "message": issue or ("DeepSeek API: solde et reprise inconnus, facturation par token"
+                             if installed else "Codex CLI non installée"),
+    }
 
 
 def record_gemini_usage(
@@ -228,13 +245,16 @@ def admit_route(
         )
         for provider in usage_providers()
     }
+    if get_provider_spec(route.primary).manual_only:
+        capacity[route.primary] = _provider_capacity(by_provider.get(route.primary), threshold, timestamp)
     constrained = {
         provider: detail
         for provider, (eligible, _, detail) in capacity.items()
         if eligible is False
     }
     if wait_for_provider and capacity.get(route.primary, (None,))[0] is False:
-        retry_at = _next_quota_reset(
+        retry_at = by_provider.get(route.primary, {}).get("retry_at")
+        retry_at = retry_at if isinstance(retry_at, (int, float)) and retry_at > timestamp else _next_quota_reset(
             [by_provider[route.primary]] if route.primary in by_provider else [],
             threshold=threshold,
             now=timestamp,
@@ -244,11 +264,17 @@ def admit_route(
             "message": (
                 f"{route.primary.capitalize()} est réservé pour ce projet, mais "
                 "sa réserve connue est insuffisante."
+                f" {capacity[route.primary][2]}"
             ),
             "forced": False,
             "blocked": True,
             "retry_at": retry_at,
             "reserved_provider": route.primary,
+            "automatic_retry": not (
+                by_provider.get(route.primary, {}).get("error_kind") in {
+                    "authentication", "insufficient_balance", "rate_limit",
+                } and by_provider.get(route.primary, {}).get("retry_at") is None
+            ),
         }
     if forced_mode:
         relevant = {
@@ -490,6 +516,7 @@ def _provider_capacity(
             "quota_exhausted",
             "temporarily_unavailable",
             "unavailable",
+            "balance_exhausted", "rate_limited", "authentication_required",
         } or any(
             marker in detail.lower()
             for marker in (

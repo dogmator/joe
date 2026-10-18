@@ -625,7 +625,8 @@ function providerRow(provider, interactive) {
   state.textContent = [
     t(providerState(provider).key),
     provider.version || "",
-    provider.runtime_issue || ""
+    provider.runtime_issue || "",
+    provider.last_failure?.message || ""
   ].filter(Boolean).join(" · ");
   head.append(name, state);
   row.appendChild(head);
@@ -941,6 +942,7 @@ let loadUsage;
 let showQuotaNotice;
 let updateCountdowns;
 let renderUsage;
+let usageDescription;
 
 function shortCommit(value) {
   return value ? value.slice(0, 8) : t("unavailable");
@@ -1501,7 +1503,8 @@ function updateWorkflowFallback(provider, fallback) {
   loadUsage,
   showQuotaNotice,
   updateCountdowns,
-  renderUsage
+  renderUsage,
+  usageDescription
 } = window.createJoeUsage({
   state,
   $,
@@ -1700,13 +1703,19 @@ function handleEvent(conversationId, event, finalBubble) {
     const followOutput = shouldFollow(agent.output);
     agent.output.textContent += event.text;
     scrollIfFollowing(agent.output, followOutput);
+  } else if (event.type === "usage") {
+    const agent = ensureAgent(event.provider);
+    const row = document.createElement("div");
+    row.className = "activity-row";
+    row.textContent = usageDescription(event);
+    agent.activity.appendChild(row);
   } else if (event.type === "workflow_update") {
     renderWorkflowUpdate(event, finalBubble, activeRun?.runId || "");
   } else if (event.type === "provider_end") {
     const agent = ensureAgent(event.provider);
     agent.card.classList.remove("active");
     agent.heartbeat.classList.add("hidden");
-    agent.status.textContent = event.ok ? t("done") : `${t("failed")} · ${event.error || t("unknown")}`;
+    agent.status.textContent = event.ok ? t("done") : `${t("failed")} · ${event.error_message || event.error || t("unknown")}`;
     if (!structuredWorkflow && event.ok) {
       renderWorkflowUpdate({
         mode: activeRun?.mode || "fast",
