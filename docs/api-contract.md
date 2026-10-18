@@ -144,7 +144,6 @@ server secret and immediately revokes earlier cookies and Bearer tokens.
   "request": "User request",
   "conversation_id": "identifier",
   "agent": "codex",
-  "reviewer": "deepseek",
   "mode": "review",
   "model": "gpt-5.6-sol",
   "effort": "high",
@@ -155,17 +154,6 @@ server secret and immediately revokes earlier cookies and Bearer tokens.
 Only `request` and `conversation_id` are mandatory. Absent values fall back to
 routing and to the conversation settings. Success returns `{"run_id": "…"}`
 with HTTP 202.
-
-`reviewer` is optional. A nonempty provider id explicitly fixes the second
-provider and requires `mode: "review"` or an omitted mode. The executor and
-reviewer must differ and the reviewer must be available; invalid selections
-return HTTP 400 before execution. Omit `reviewer` or send an empty string for
-automatic reviewer selection. DeepSeek can be selected explicitly in this field;
-it is never chosen automatically. Main `model` and `effort` values do not cross
-into the reviewer's profile. A failed explicit reviewer stops REVIEW rather
-than silently switching to another provider. Changing the reviewer invalidates
-an existing access approval. Conversation settings and pending runs preserve
-the explicit choice.
 
 The legacy `danger-full-access` mode asks for an HTTP 428 confirmation, but
 does not disable the provider's sandbox. Once confirmed, it grants full access
@@ -253,18 +241,3 @@ The more detailed functional tests stay in `tests/test_web.py`.
 Mutations require the `maintainer` profile. `execution_mode` is limited to
 `read-only` and `workspace-write`: an autonomous plan cannot approve its own
 full access.
-
-
-### Usage presentation and DeepSeek funds
-
-`GET /api/usage` retains its authenticated viewer access. Usage entries may add
-`quota_display` (`cli_unsupported`, `interactive_only`, or `token_billing`),
-`installed`, and `setup_required` for presentation. An unsupported quota source
-must not be interpreted as a provider connection failure.
-
-DeepSeek's nested `balance` contains `available` (balance data retrieved),
-`amount`, `currency`, `balance_usd` (null for non-USD), `is_available` (the API's
-sufficient-funds flag), `error_kind`, and `http_status`. A failed read has null
-money values and `available: false`, without changing the provider entry's own
-`available` field. Account amounts never populate percentage quota windows.
-The existing usage cache applies; `?force=1` retains its maintainer requirement.
