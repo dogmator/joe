@@ -58,6 +58,13 @@ def test_deepseek_unknown_model_has_unknown_cost():
     assert result["cost_usd"] is None
 
 
+def test_deepseek_missing_model_is_not_priced_as_flash():
+    result = parse_provider_usage("deepseek", '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":10}}')
+    assert result["model"] == "unknown"
+    assert result["cost_usd"] is None
+    assert result["cost_status"] == "unknown"
+
+
 def test_autonomous_token_budget_counts_inclusive_usage_once():
     from joe.autonomous_analysis import model_usage
 

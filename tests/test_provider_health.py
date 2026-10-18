@@ -44,7 +44,7 @@ def test_insufficient_balance_stays_stopped_without_a_fictitious_reset(monkeypat
     assert result.get("cooldown_seconds") is None
     assert result.get("retry_at") is None
     assert result["windows"] == []
-    assert recent_failure("deepseek") == ("insufficient_balance", None)
+    assert recent_failure("deepseek") == ("insufficient_balance", float("inf"))
     record_result(ProviderResult("deepseek", [], "OK", "", 0, 0))
     assert recent_failure("deepseek") is None
 
@@ -58,6 +58,7 @@ def test_rate_limit_only_waits_until_an_explicit_retry_time(monkeypatch, retry, 
     assert not item["available"]
     assert item.get("cooldown_seconds") == expected
     assert item.get("retry_at") == (1015 if retry else None)
+    assert recent_failure("deepseek")[1] == (expected if retry else float("inf"))
 
 
 def test_reserved_deepseek_balance_failure_never_schedules_automatic_resume():

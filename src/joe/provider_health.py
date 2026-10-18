@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import threading
 import time
 from typing import Any
@@ -13,7 +14,9 @@ _COOLDOWN_SECONDS = {
     "authentication": 5 * 60,
     "unavailable": 2 * 60,
 }
-_failures: dict[str, tuple[float | None, str]] = {}
+# Une pause sans reprise connue expire à float("inf") : aucune horloge ne la lève.
+_INDEFINITE = float("inf")
+_failures: dict[str, tuple[float, str]] = {}
 _details: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
 
@@ -30,28 +33,32 @@ def record_result(result: ProviderResult) -> None:
         }
         if indefinite:
             duration = result.retry_after_seconds if result.error_kind == "rate_limit" else None
+            if duration is None:
+                duration = _INDEFINITE
         _details[result.provider] = {
             "error_kind": result.error_kind,
             "message": result.error_message or result.error_kind or "process failed",
             "http_status": result.http_status,
-            "retry_at": (time.time() + duration if result.error_kind == "rate_limit" and duration is not None else None),
+            "retry_at": (
+                time.time() + duration
+                if result.error_kind == "rate_limit" and duration is not None and not math.isinf(duration)
+                else None
+            ),
         }
-        if duration is not None or indefinite:
-            _failures[result.provider] = (
-                time.monotonic() + duration if duration is not None else None,
-                str(result.error_kind),
-            )
+        if duration is not None:
+            _failures[result.provider] = (time.monotonic() + duration, str(result.error_kind))
 
 
-def recent_failure(provider: str) -> tuple[str, int | None] | None:
+def recent_failure(provider: str) -> tuple[str, float] | None:
     with _lock:
         failure = _failures.get(provider)
         if not failure:
             return None
         until, kind = failure
-        if until is None:
-            return kind, None
-        remaining = int(max(0, until - time.monotonic()))
+        remaining = until - time.monotonic()
+        if math.isinf(remaining):
+            return kind, remaining
+        remaining = int(max(0, remaining))
         if remaining <= 0:
             _failures.pop(provider, None)
             return None
@@ -77,7 +84,9 @@ def apply_cooldowns(statuses: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "quota": "quota_exhausted", "insufficient_balance": "balance_exhausted",
                 "rate_limit": "rate_limited", "authentication": "authentication_required",
             }.get(kind, "temporarily_unavailable")
-            item["cooldown_seconds"] = remaining
+            indefinite = math.isinf(remaining)
+            # float("inf") n'est pas du JSON valide : l'API garde None.
+            item["cooldown_seconds"] = None if indefinite else remaining
             item.update(error_kind=kind, http_status=detail.get("http_status"),
                         error_message=detail.get("message"), retry_at=detail.get("retry_at"))
             if get_provider_spec(str(item.get("provider", ""))).quota_kind == "balance":
@@ -85,7 +94,7 @@ def apply_cooldowns(statuses: list[dict[str, Any]]) -> list[dict[str, Any]]:
             message = str(detail.get("message") or kind)
             item["message"] = (
                 f"{message} · reprise inconnue, intervention ou nouvel essai manuel nécessaire"
-                if remaining is None else
+                if indefinite else
                 f"{message} · pause temporaire, nouvel essai dans {max(1, (remaining + 59) // 60)} min"
             )
         adjusted.append(item)

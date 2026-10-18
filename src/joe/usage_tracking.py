@@ -112,7 +112,7 @@ def parse_provider_usage(provider: str, output: str, model: str | None = None) -
     if not found:
         return None
     resolved_model = model or (sorted(models)[0] if models else (
-        "deepseek-flash" if provider == "deepseek" else None
+        "unknown" if provider == "deepseek" else None
     ))
     cost, cost_status = None, "unknown"
     if provider in {"claude", "antigravity"}:
