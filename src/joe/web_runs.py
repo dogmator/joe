@@ -852,6 +852,7 @@ class RunManager:
                     retry_at = quota_admission.get("retry_at")
                     if (
                         self._project_uses_quota_automation(run.conversation_id)
+                        and quota_admission.get("automatic_retry", True)
                     ):
                         if not isinstance(retry_at, (int, float)):
                             retry_at = _quota_backoff(run.defer_count)
@@ -1045,7 +1046,7 @@ class RunManager:
                         if event.get("error")
                         else "evidence_run_stopped_unknown"
                     ),
-                    "detail_params": {"error": str(event.get("error") or "")},
+                    "detail_params": {"error": str(event.get("error_message") or event.get("error") or "")},
                 }
             )
         if event.get("type") != "provider_end" or event.get("error") != "quota":
@@ -3205,6 +3206,7 @@ def _run_summary(run: LiveRun) -> dict[str, Any]:
                 key: event.get(key)
                 for key in (
                     "level", "message", "forced", "blocked", "retry_at",
+                    "automatic_retry", "reserved_provider",
                 )
             }
         elif event_type == "workflow_update":
@@ -3253,6 +3255,7 @@ def _run_summary(run: LiveRun) -> dict[str, Any]:
                             "input_tokens", "output_tokens", "cache_read_tokens",
                             "cache_creation_tokens", "reasoning_tokens", "cost_usd",
                             "cost_status", "source",
+                            "total_tokens", "cost_provider", "cost_rate_basis", "cost_rates_as_of",
                         )
                     }
                     break
@@ -3266,6 +3269,9 @@ def _run_summary(run: LiveRun) -> dict[str, Any]:
                         "complete" if event.get("ok") else "failed"
                     )
                     attempt["error"] = event.get("error")
+                    if event.get("error_message"):
+                        attempt["error_message"] = event["error_message"]
+                        attempt["http_status"] = event.get("http_status")
                     break
     return {
         "route": route,

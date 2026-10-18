@@ -10,7 +10,6 @@ from typing import Callable
 
 from .capabilities import provider_defaults
 from .provider_registry import counterpart, get_provider_spec
-from .usage_tracking import parse_provider_usage
 from .memory import ProjectMemory
 from .models import Intent, Mode, ProviderResult, Route
 from .orchestrator_workflows import (
@@ -394,7 +393,7 @@ class Orchestrator:
                 ).lstrip()
             results.append(result)
             record_result(result)
-            usage = parse_provider_usage(name, result.stdout, selected_model)
+            usage = result.usage
             if usage and on_event:
                 on_event({"type": "usage", **usage})
             if on_event:
@@ -404,6 +403,8 @@ class Orchestrator:
                         "provider": name,
                         "ok": result.ok,
                         "error": result.error_kind,
+                        **({"error_message": result.error_message, "http_status": result.http_status}
+                           if result.error_message else {}),
                     }
                 )
             # Une annulation est une fin de tentative comme les autres. Lever
@@ -439,7 +440,10 @@ class Orchestrator:
                             "error": result.error_kind,
                         }
                     )
-        errors = ", ".join(f"{r.provider}:{r.error_kind}" for r in results)
+        errors = ", ".join(
+            f"{r.provider}:{r.error_kind}" + (f" ({r.error_message})" if r.error_message else "")
+            for r in results
+        )
         raise OrchestrationError(f"All providers failed ({errors})")
 
     @staticmethod

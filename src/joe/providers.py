@@ -23,6 +23,8 @@ from .provider_registry import (
     provider_backend,
 )
 from .usage import record_gemini_usage
+from .usage_tracking import parse_provider_usage
+from .codex_results import codex_failure
 
 StreamCallback = Callable[[str, str], None]
 PROVIDER_HEARTBEAT_SECONDS = 10.0
@@ -543,6 +545,10 @@ class Provider:
             )
             if self.name == "gemini":
                 record_gemini_usage(stdout)
+            usage = parse_provider_usage(self.name, stdout, model)
+            failure = codex_failure(stdout, self.name) if uses_stdin else {}
+            if failure.get("error_message"):
+                stderr = (stderr.rstrip() + "\n" + failure["error_message"]).lstrip()
             stdout = _final_output(self.name, stdout)
             duration = time.monotonic() - start
             kind = classify_error(
@@ -553,30 +559,35 @@ class Provider:
             redacted_command = [_redact_values(part, secret_values) for part in command]
             return ProviderResult(
                 self.name, redacted_command, stdout, stderr,
-                process.returncode, duration, error_kind=kind,
+                process.returncode, duration,
+                usage=usage, **{"error_kind": kind, **failure},
             )
         except TimeoutError as exc:
             redacted_command = [_redact_values(part, secret_values) for part in command]
+            partial = getattr(exc, "stdout", "")
             return ProviderResult(
                 self.name,
                 redacted_command,
-                getattr(exc, "stdout", ""),
+                _final_output(self.name, partial),
                 getattr(exc, "stderr", ""),
                 124,
                 time.monotonic() - start,
                 timed_out=True,
                 error_kind="timeout",
+                usage=parse_provider_usage(self.name, partial, model),
             )
         except ProviderCancelled as exc:
             redacted_command = [_redact_values(part, secret_values) for part in command]
+            partial = getattr(exc, "stdout", "")
             return ProviderResult(
                 self.name,
                 redacted_command,
-                getattr(exc, "stdout", ""),
+                _final_output(self.name, partial),
                 getattr(exc, "stderr", ""),
                 130,
                 time.monotonic() - start,
                 error_kind="cancelled",
+                usage=parse_provider_usage(self.name, partial, model),
             )
 
 

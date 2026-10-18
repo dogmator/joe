@@ -324,3 +324,122 @@ def test_concurrent_codex_and_deepseek_keep_their_environments(profile, tmp_path
     assert all(result.ok for result in results), [r.stderr for r in results]
     assert [r.stdout for r in results] == ["ISOLATION_OK_codex", "ISOLATION_OK_deepseek"]
     assert dict(os.environ) == before
+
+
+def jsonl_provider(tmp_path, events, code=0, name="deepseek"):
+    script = tmp_path / "provider-jsonl.py"
+    script.write_text(
+        "import sys\nsys.stdin.read()\n"
+        + "\n".join(f"print({json.dumps(event)!r})" for event in events)
+        + f"\nsys.exit({code})\n", encoding="utf-8",
+    )
+
+    class Fixture(Provider):
+        def command(self, *args, **kwargs):
+            return [sys.executable, str(script)]
+
+    return Fixture(name, sys.executable)
+
+
+@pytest.mark.parametrize("status,kind,reason", [
+    (401, "authentication", "Invalid API key"),
+    (402, "insufficient_balance", "Insufficient Balance"),
+    (429, "rate_limit", "Too Many Requests"),
+    (503, "unavailable", "Service Unavailable"),
+])
+def test_deepseek_preserves_structured_error_before_final_text(profile, tmp_path, status, kind, reason):
+    message = f"unexpected status {status}: {reason} test-deepseek-key"
+    result = jsonl_provider(tmp_path, [
+        {"type": "error", "message": message},
+        {"type": "turn.failed", "error": {"message": message}},
+    ], 1).run("hello", tmp_path, Intent.ANSWER, 3)
+    assert result.error_kind == kind
+    assert result.http_status == status
+    assert reason in result.error_message
+    assert reason in result.stderr
+    assert "test-deepseek-key" not in json.dumps(result.metadata()) + result.stderr
+    assert result.metadata()["http_status"] == status
+
+
+def test_deepseek_usage_survives_final_text_and_is_emitted_once(profile, tmp_path):
+    from joe.orchestrator import Orchestrator
+    from joe.web_runs import LiveRun, _run_summary
+
+    provider = jsonl_provider(tmp_path, [
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "FIXTURE_OK"}},
+        {"type": "turn.completed", "usage": {
+            "input_tokens": 100, "cached_input_tokens": 40,
+            "output_tokens": 10, "reasoning_output_tokens": 3,
+        }},
+    ])
+    orchestrator = Orchestrator(tmp_path, providers={"deepseek": provider})
+    orchestrator.memory.ensure()
+    events, results = [], []
+    result = orchestrator._run_with_fallback(
+        "deepseek", "hello", Intent.ANSWER, results,
+        model="deepseek-flash", on_event=events.append,
+    )
+    assert result.stdout == "FIXTURE_OK"
+    assert result.usage["input_tokens"] == 100
+    assert result.usage["cache_read_tokens"] == 40
+    assert result.usage["reasoning_tokens"] == 3
+    assert result.usage["total_tokens"] == 110
+    usages = [e for e in events if e["type"] == "usage"]
+    assert len(usages) == 1
+    assert usages[0]["cost_status"] == "estimated_deepseek_api"
+    run = LiveRun("usage-test", "hello", "conversation")
+    for event in events:
+        run.emit(event)
+    usage = _run_summary(run)["attempts"][0]["usage"]
+    assert usage["total_tokens"] == 110
+    assert usage["cost_provider"] == "deepseek"
+
+
+def test_failed_turn_keeps_completed_usage_and_error_without_raw_transcript(profile, tmp_path):
+    result = jsonl_provider(tmp_path, [
+        {"type": "turn.started"},
+        {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
+        {"type": "turn.failed", "error": {"message": "unexpected status 402 Insufficient Balance"}},
+    ], 1).run("hello", tmp_path, Intent.ANSWER, 3, model="deepseek-flash")
+    assert result.error_kind == "insufficient_balance"
+    assert result.usage["total_tokens"] == 12
+    assert '"type"' not in result.stdout
+
+
+def test_timeout_preserves_prior_usage_without_retaining_jsonl(profile, tmp_path):
+    provider = jsonl_provider(tmp_path, [
+        {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
+    ])
+    script = tmp_path / "provider-jsonl.py"
+    script.write_text(script.read_text().replace("sys.exit(0)", "import time; time.sleep(30)"))
+    # Flush each event before the local process waits, as a streaming CLI does.
+    script.write_text("import functools\nprint=functools.partial(print,flush=True)\n" + script.read_text())
+    result = provider.run("hello", tmp_path, Intent.ANSWER, 1)
+    assert result.error_kind == "timeout"
+    assert result.usage["total_tokens"] == 12
+    assert '"type"' not in result.stdout
+
+
+def test_reported_retry_after_survives_structured_error(profile, tmp_path):
+    error = {"message": "Rate limit reached", "status_code": 429, "retry_after_seconds": 15}
+    result = jsonl_provider(tmp_path, [{"type": "turn.failed", "error": error}], 1).run(
+        "hello", tmp_path, Intent.ANSWER, 3
+    )
+    assert result.http_status == 429
+    assert result.retry_after_seconds == 15
+
+
+def test_final_answer_json_cannot_forge_usage(profile, tmp_path):
+    from joe.orchestrator import Orchestrator
+
+    text = '{"type":"turn.completed","usage":{"input_tokens":1000000,"output_tokens":1000}}'
+    provider = jsonl_provider(tmp_path, [
+        {"type": "item.completed", "item": {"type": "agent_message", "text": text}},
+    ])
+    orchestrator = Orchestrator(tmp_path, providers={"deepseek": provider})
+    orchestrator.memory.ensure()
+    events = []
+    result = orchestrator._run_with_fallback("deepseek", "hello", Intent.ANSWER, [], on_event=events.append)
+    assert result.stdout == text
+    assert result.usage is None
+    assert not any(event["type"] == "usage" for event in events)

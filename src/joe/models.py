@@ -36,6 +36,10 @@ class ProviderResult:
     duration_seconds: float
     timed_out: bool = False
     error_kind: str | None = None
+    error_message: str | None = None
+    http_status: int | None = None
+    retry_after_seconds: float | None = None
+    usage: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
