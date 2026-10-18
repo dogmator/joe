@@ -213,8 +213,8 @@ def _intent_text(text: str) -> tuple[str, bool]:
             flags=re.IGNORECASE,
         )
         read_only = read_only or bool(count)
-    for pattern in NEGATED_ACTION_CLAUSES:
-        actionable = pattern.sub(" ", actionable)
+    for clause in NEGATED_ACTION_CLAUSES:
+        actionable = clause.sub(" ", actionable)
     return actionable, read_only
 
 
@@ -404,7 +404,7 @@ class Router:
         elif explicit_provider and not explicit_workflow_review:
             primary = explicit_provider
         elif follow_up_review:
-            primary = counterpart(previous_provider or "")
+            primary = counterpart(previous_provider or "") or "codex"
         elif any(phrase in lower for phrase in LARGE_CONTEXT_WORDS):
             primary = "antigravity"
         elif words & DOC_WORDS or words & ARCHITECTURE_WORDS:

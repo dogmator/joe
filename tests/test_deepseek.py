@@ -65,7 +65,7 @@ def test_deepseek_has_own_cli_and_catalog_identity():
 
 
 def test_deepseek_catalog_does_not_use_openai_models(profile, monkeypatch):
-    monkeypatch.setattr("joe.capabilities.resolve_executable", lambda name: "/bin/codex")
+    monkeypatch.setattr("joe.capabilities.resolve_executable", lambda name: "/bin/codex" if name == "deepseek" else None)
     catalog = capabilities.provider_capabilities(refresh=True)["deepseek"]
     assert catalog["available"]
     assert {x["id"] for x in catalog["models"]} == {"deepseek-flash", "deepseek-v4-pro"}
@@ -75,7 +75,7 @@ def test_deepseek_catalog_does_not_use_openai_models(profile, monkeypatch):
 
 def test_deepseek_missing_key_is_not_ready(profile, monkeypatch):
     (profile.parent / "credentials.json").unlink()
-    monkeypatch.setattr("joe.capabilities.resolve_executable", lambda name: "/bin/codex")
+    monkeypatch.setattr("joe.capabilities.resolve_executable", lambda name: "/bin/codex" if name == "deepseek" else None)
     catalog = capabilities.provider_capabilities(refresh=True)["deepseek"]
     assert not catalog["available"]
     assert catalog.get("setup_required")
@@ -564,3 +564,52 @@ def test_review_uses_separate_profile_defaults_and_keys(profile, tmp_path, monke
     assert [event["provider"] for event in events if event["type"] == "usage"] == [primary, reviewer]
     assert "test-deepseek-key" not in log.read_text()
     assert "ordinary-openai-key" not in log.read_text()
+
+
+@pytest.mark.parametrize("failure,kind", [(401, "authentication"), (402, "insufficient_balance"),
+                                          ("cancel", "cancelled")])
+def test_explicit_review_failure_does_not_complete_or_replace_the_reviewer(profile, tmp_path, failure, kind):
+    import threading
+    from joe.orchestrator import OrchestrationError, Orchestrator
+
+    implementation = tmp_path / "implementation"
+    implementation.mkdir()
+    review = tmp_path / "review"
+    review.mkdir()
+    providers = {
+        "codex": jsonl_provider(implementation, [
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "Implementation complete."}},
+        ], name="codex"),
+        "deepseek": jsonl_provider(review, [
+            {"type": "turn.failed", "error": {"message": f"unexpected status {failure}: fixture failure"}},
+        ], 1),
+    }
+    class ForbiddenFallback:
+        def run(self, *args, **kwargs):
+            pytest.fail("An explicit reviewer must not be replaced")
+
+    providers["claude"] = ForbiddenFallback()
+    orchestrator = Orchestrator(tmp_path, providers=providers)
+    # A fallback is configured deliberately: an explicit reviewer must remain fixed.
+    config = orchestrator.memory.config()
+    config["fallbacks"]["deepseek"] = ["claude"]
+    (orchestrator.memory.root / "config.yaml").write_text(json.dumps(config))
+    route = orchestrator.router.route("Implement change", forced_agent="codex", forced_reviewer="deepseek")
+    events = []
+    cancel = threading.Event()
+
+    def on_event(event):
+        events.append(event)
+        if failure == "cancel" and event["type"] == "provider_start" and event["provider"] == "deepseek":
+            cancel.set()
+
+    with pytest.raises(OrchestrationError):
+        orchestrator.execute("Implement change", route, execution_mode="read-only",
+                             cancel_event=cancel, on_event=on_event)
+    assert [e["provider"] for e in events if e["type"] == "provider_start"] == ["codex", "deepseek"]
+    terminal = [e for e in events if e["type"] == "provider_end"][-1]
+    assert terminal["provider"] == "deepseek"
+    assert terminal["error"] == kind
+    assert not terminal["ok"]
+    assert not [e for e in events if e["type"] == "workflow_update" and e.get("stage") == "review"
+                and e.get("status") == "complete"]

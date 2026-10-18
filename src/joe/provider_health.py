@@ -24,7 +24,7 @@ def record_result(result: ProviderResult) -> None:
             _failures.pop(result.provider, None)
             _details.pop(result.provider, None)
             return
-        duration = _COOLDOWN_SECONDS.get(result.error_kind or "")
+        duration: float | None = _COOLDOWN_SECONDS.get(result.error_kind or "")
         indefinite = get_provider_spec(result.provider).quota_kind == "balance" and result.error_kind in {
             "authentication", "insufficient_balance", "rate_limit",
         }

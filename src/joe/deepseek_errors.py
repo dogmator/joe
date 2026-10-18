@@ -10,7 +10,7 @@ def classify_failure(failure: ProviderFailure) -> ProviderFailure:
     kind = {
         401: "authentication", 402: "insufficient_balance",
         429: "rate_limit", 503: "unavailable",
-    }.get(failure.http_status)
+    }.get(failure.http_status) if failure.http_status is not None else None
     if kind is None:
         message = failure.error_message.lower()
         kind = next((value for marker, value in (

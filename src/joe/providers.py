@@ -11,7 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TypedDict
 from urllib.parse import quote, quote_plus
 
 from .models import Intent, ProviderResult
@@ -685,8 +685,8 @@ def active_providers(
     usable = {
         name: provider
         for name, provider in declared.items()
-        if name not in refused and resolve_executable(name)
-        and (name != "deepseek" or not provider_runtime_issue(name, resolve_executable(name)))
+        if name not in refused and (executable := resolve_executable(name))
+        and (name != "deepseek" or not provider_runtime_issue(name, executable))
     }
     return usable or {
         name: provider for name, provider in declared.items()
@@ -710,7 +710,7 @@ def _collect_streams(
     watchdog_seconds: float | None = None,
 ) -> tuple[str, str]:
     events: queue.Queue[tuple[str, str | None]] = queue.Queue()
-    output = {"stdout": [], "stderr": []}
+    output: dict[str, list[str]] = {"stdout": [], "stderr": []}
 
     def read(stream_name: str, stream) -> None:
         try:
@@ -738,6 +738,7 @@ def _collect_streams(
     )
     closed = 0
     process_exited_at: float | None = None
+    error: ProviderCancelled | TimeoutError
     while closed < 2:
         if cancel_event and cancel_event.is_set():
             _stop_process(process)
@@ -833,7 +834,8 @@ def _stop_orphaned_process_group(process: subprocess.Popen[str]) -> None:
     if os.name == "nt":
         for stream in (process.stdout, process.stderr):
             try:
-                stream.close()
+                if stream is not None:
+                    stream.close()
             except (AttributeError, OSError):
                 pass
         return
@@ -843,9 +845,14 @@ def _stop_orphaned_process_group(process: subprocess.Popen[str]) -> None:
         pass
 
 
+class ProcessGroupOptions(TypedDict, total=False):
+    creationflags: int
+    start_new_session: bool
+
+
 def _process_group_options(
     platform_name: str | None = None,
-) -> dict[str, int | bool]:
+) -> ProcessGroupOptions:
     platform = os.name if platform_name is None else platform_name
     if platform == "nt":
         return {
@@ -1028,12 +1035,11 @@ def _activity_gemini(event: dict) -> dict[str, str] | None:
 
 def _event_model(event: dict[str, object]) -> str | None:
     """Best-effort extraction of the precise model id from a CLI init event."""
+    data, session = event.get("data"), event.get("session")
     candidates = (
         event.get("model"),
-        (event.get("data") if isinstance(event.get("data"), dict) else {}).get("model"),
-        (event.get("session") if isinstance(event.get("session"), dict) else {}).get(
-            "model"
-        ),
+        data.get("model") if isinstance(data, dict) else None,
+        session.get("model") if isinstance(session, dict) else None,
     )
     for candidate in candidates:
         if isinstance(candidate, str) and candidate.strip():
@@ -1153,7 +1159,7 @@ _FINAL_EXTRACTORS = {
     "claude": _final_claude,
     "antigravity": _final_antigravity,
 }
-_FINAL_SEPARATORS = {}
+_FINAL_SEPARATORS: dict[str, str] = {}
 
 _STREAMING = {
     spec.name for spec in get_provider_specs() if spec.streams_json
