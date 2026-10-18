@@ -19,7 +19,7 @@ CLAUDE_STALE_SECONDS = 15 * 60
 
 
 def claude_unscoped_limit(scope: Any) -> bool:
-    """Optional/null model and surface fields do not add a restriction."""
+    """Un modele ou une surface optionnel/nul n'ajoute pas de restriction."""
     return scope is None or (
         isinstance(scope, dict)
         and not (scope.keys() - {"model", "surface"})
@@ -29,7 +29,7 @@ def claude_unscoped_limit(scope: Any) -> bool:
 
 
 def claude_limit_observations(value: Any, now: float) -> list[dict[str, Any]]:
-    """Retain server rows without guessing applicability from group or label."""
+    """Conserver les lignes serveur sans deduire l'applicabilite du libelle."""
     if not isinstance(value, list):
         return []
     observations = []
@@ -81,8 +81,8 @@ def claude_limit_observations(value: Any, now: float) -> list[dict[str, Any]]:
         elif not isinstance(row.get("is_active"), bool):
             observation["reason"] = "Invalid headline flag"
         elif applicable:
-            # is_active selects the headline indicator. A non-headline row
-            # can still report a current, applicable window.
+            # is_active designe l'indicateur principal. Une autre ligne peut
+            # tout de meme decrire une fenetre courante et applicable.
             observation["governing"] = True
         else:
             observation["reason"] = "Applicability unknown for Joe's selected model/surface"
@@ -144,8 +144,8 @@ def claude_status(
     for observation in observations:
         if not observation["governing"]:
             continue
-        # A duplicate server row enriches the legacy observation; different
-        # scopes or reset times always remain separate windows.
+        # Une ligne serveur dupliquee enrichit l'observation historique ; des
+        # portees ou des resets differents restent toujours des fenetres a part.
         duplicate = next((window for window in windows if (
             claude_unscoped_limit(observation.get("scope"))
             and observation["duration_minutes"] == window["duration_minutes"]

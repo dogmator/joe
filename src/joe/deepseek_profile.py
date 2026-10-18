@@ -1,4 +1,4 @@
-"""Local DeepSeek profile; reuse Codex without altering its ordinary account."""
+"""Profil DeepSeek local ; reutilise Codex sans toucher au compte ordinaire."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pathlib import Path
 
 MODELS = ("deepseek-flash", "deepseek-v4-pro")
 EFFORTS = ("low", "high", "max")
+DEEPSEEK_API_BASE_URL = "https://api.deepseek.com"
 
 
 def model_defaults(model: str | None, effort: str | None) -> tuple[str, str]:
@@ -25,12 +26,12 @@ def model_defaults(model: str | None, effort: str | None) -> tuple[str, str]:
 
 
 def apply_codex_profile(command: list[str]) -> list[str]:
-    """Add profile settings to the existing Codex command, without rebuilding it."""
+    """Ajoute le profil a la commande Codex existante, sans la reconstruire."""
     overrides: dict[str, str | bool] = {
         "model_provider": "deepseek",
         "model_catalog_json": str(profile_directory() / "models.json"),
         "model_providers.deepseek.name": "DeepSeek",
-        "model_providers.deepseek.base_url": "https://api.deepseek.com",
+        "model_providers.deepseek.base_url": DEEPSEEK_API_BASE_URL,
         "model_providers.deepseek.env_key": "DEEPSEEK_API_KEY",
         "model_providers.deepseek.wire_api": "responses",
         "model_providers.deepseek.requires_openai_auth": False,
@@ -67,8 +68,8 @@ def _api_key() -> str:
                 raise ValueError("credentials file is too large")
         payload = json.loads(text)
     except (OSError, ValueError):
-        # JSON/OS exceptions may retain the credential document. Never chain
-        # those exceptions into a user-visible traceback.
+        # Les exceptions JSON/OS peuvent retenir le document d'identifiants.
+        # On ne les enchaine jamais dans une trace visible par l'utilisateur.
         raise ValueError("DeepSeek credentials.json requires a protected regular file (0600)") from None
     key = payload.get("api_key") if isinstance(payload, dict) else None
     if not isinstance(key, str) or not key.strip():
@@ -112,32 +113,33 @@ class DeepSeekBalance(TypedDict):
     balance_usd: float | None
     amount: float | None
     currency: str | None
-    available: bool
-    is_available: bool | None
+    data_available: bool
+    funds_sufficient: bool | None
     error_kind: str | None
     http_status: int | None
 
 
-_BALANCE_URL = "https://api.deepseek.com/user/balance"
+_BALANCE_URL = f"{DEEPSEEK_API_BASE_URL}/user/balance"
 
 
 class _NoBalanceRedirect(HTTPRedirectHandler):
     def redirect_request(self, req: Request, fp: Any, code: int, msg: str,
                          headers: Any, newurl: str) -> None:
-        # Never forward the credential to a redirected host or an HTTP URL.
+        # Ne jamais transmettre l'identifiant a un hote redirige ni en HTTP.
         return None
 
 
 def fetch_deepseek_balance() -> DeepSeekBalance:
-    """Read account funds without running a model; failure means unknown, not zero.
+    """Lit les fonds du compte sans lancer de modele ; l'echec reste inconnu.
 
-    ``available`` describes balance data, while ``is_available`` is the API's
-    separate indication that funds are sufficient for model calls. Non-USD
-    balances retain their actual currency and never populate ``balance_usd``.
+    ``data_available`` decrit la disponibilite des donnees de solde, tandis que
+    ``funds_sufficient`` reprend l'indication distincte de l'API sur la
+    suffisance des fonds pour les appels. Un solde non-USD conserve sa devise
+    reelle et ne remplit jamais ``balance_usd``.
     """
     result: DeepSeekBalance = {
         "balance_usd": None, "amount": None, "currency": None,
-        "available": False, "is_available": None,
+        "data_available": False, "funds_sufficient": None,
         "error_kind": None, "http_status": None,
     }
     try:
@@ -182,7 +184,7 @@ def fetch_deepseek_balance() -> DeepSeekBalance:
         return result
     result.update({
         "balance_usd": amount if selected["currency"] == "USD" else None,
-        "amount": amount, "currency": selected["currency"], "available": True,
-        "is_available": data["is_available"],
+        "amount": amount, "currency": selected["currency"], "data_available": True,
+        "funds_sufficient": data["is_available"],
     })
     return result

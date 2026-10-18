@@ -13,6 +13,15 @@ def test_parse_claude_jsonl_usage_and_estimated_model_cost():
     assert result["cost_usd"] is not None
 
 
+def test_parse_antigravity_claude_usage_keeps_the_estimated_api_cost():
+    result = parse_provider_usage(
+        "antigravity",
+        '{"message":{"model":"claude-opus-4-6-thinking","usage":{"input_tokens":1000000,"output_tokens":1000}}}',
+    )
+    assert result["cost_status"] == "estimated_api"
+    assert result["cost_usd"] is not None
+
+
 def test_usage_unknown_provider_keeps_cost_unknown():
     result = parse_provider_usage(
         "copilot",

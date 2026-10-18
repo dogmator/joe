@@ -9,6 +9,30 @@ window.createJoeUsage = function createJoeUsage({
     }
     return tr("usage_tokens_count", { tokens });
   }
+
+  function balanceView(provider) {
+    const balance = provider.balance;
+    const amount = balance?.amount ?? balance?.balance_usd;
+    const currency = balance?.currency || "USD";
+    const known = balance?.data_available === true && typeof amount === "number"
+      && Number.isFinite(amount) && ["USD", "CNY"].includes(currency);
+    const view = { text: tr("usage_balance_unavailable"), note: "" };
+    if (known) {
+      view.text = new Intl.NumberFormat(document.documentElement?.lang || "en", {
+        style: "currency", currency, minimumFractionDigits: 2,
+        maximumFractionDigits: amount > 0 && amount < 0.01 ? 6 : 2
+      }).format(amount);
+      if (balance.funds_sufficient === false) view.note = tr("usage_balance_insufficient");
+    } else if (balance?.error_kind === "authentication") {
+      view.note = tr("usage_balance_auth", { status: balance.http_status || 401 });
+    } else if (balance?.error_kind === "credentials") {
+      view.note = tr("usage_balance_credentials");
+    } else {
+      view.note = tr("usage_balance_retry");
+    }
+    return view;
+  }
+
   async function loadUsage(force = false) {
     const button = $("refresh-usage");
     if (force) {
@@ -28,74 +52,31 @@ window.createJoeUsage = function createJoeUsage({
     }
   }
 
-  function usageCardView(provider) {
-    const kinds = {
-      cli_unsupported: { badge: "usage_cli_badge", note: "usage_cli_note", icon: "terminal" },
-      interactive_only: { badge: "usage_interactive_badge", note: "usage_interactive_note", icon: "interactive" },
-      token_billing: { badge: "usage_token_badge", note: "usage_token_note", icon: "money" }
-    };
-    const kind = kinds[provider.quota_display];
-    const problem = Boolean(provider.error_kind || provider.setup_required || provider.installed === false
-      || (!kind && provider.available === false));
-    const view = {
-      problem, metered: provider.quota_display === "token_billing",
-      badge: kind ? tr(kind.badge) : "", icon: kind?.icon || "",
-      note: problem
-        ? provider.error_message || provider.setup_required || provider.message || tr("usage_provider_unavailable")
-        : kind ? tr(kind.note) : provider.message || "",
-      balanceText: tr("usage_balance_unavailable")
-    };
-    if (view.metered) {
-      const balance = provider.balance;
-      const amount = balance?.amount ?? balance?.balance_usd;
-      const currency = balance?.currency || "USD";
-      const known = balance?.available === true && typeof amount === "number"
-        && Number.isFinite(amount) && ["USD", "CNY"].includes(currency);
-      if (known) {
-        view.balanceText = new Intl.NumberFormat(document.documentElement?.lang || "en", {
-          style: "currency", currency, minimumFractionDigits: 2,
-          maximumFractionDigits: amount > 0 && amount < 0.01 ? 6 : 2
-        }).format(amount);
-        if (!problem && balance.is_available === false) view.note = tr("usage_balance_insufficient");
-      } else if (!problem) {
-        view.note = balance?.error_kind === "authentication"
-          ? tr("usage_balance_auth", { status: balance.http_status || 401 })
-          : balance?.error_kind === "credentials"
-            ? tr("usage_balance_credentials") : tr("usage_balance_retry");
-      }
-    }
-    return view;
-  }
-
-  function quotaIcon(name) {
-    const paths = {
-      terminal: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/>',
-      interactive: '<path d="M21 11a8 8 0 0 1-8 8H7l-4 3v-6a8 8 0 1 1 18-5Z"/><path d="M8 11h8m-8 4h5"/>',
-      money: '<path d="M12 2v20m5-15H9a3 3 0 0 0 0 6h6a3 3 0 0 1 0 6H6"/>'
-    };
-    return paths[name] ? `<svg class="usage-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">${paths[name]}</svg>` : "";
-  }
-
   function renderUsage() {
     const target = $("usage");
     target.replaceChildren();
     for (const provider of state.usage) {
-      const view = usageCardView(provider);
+      const metered = provider.quota_display === "token_billing";
       const card = document.createElement("article");
-      card.className = ["usage-card", view.problem ? "unavailable" : "",
-        provider.quota_display ? "usage-card--info" : "",
-        view.metered ? "usage-card--metered" : "", provider.stale ? "stale" : ""].filter(Boolean).join(" ");
-      const badge = view.badge
-        ? `<span class="usage-badge">${escapeHtml(view.badge)}</span>`
-        : provider.plan ? `<span class="usage-plan">${escapeHtml(provider.plan)}</span>` : "";
-      card.innerHTML = `<header><strong>${escapeHtml(provider.label || provider.provider)}</strong>${badge}</header>`;
-      if (view.metered) {
-        const balance = document.createElement("div");
-        balance.className = "usage-balance";
-        balance.innerHTML = `<span>${escapeHtml(tr("usage_balance_label"))}</span><strong>${escapeHtml(view.balanceText)}</strong>`;
-        card.appendChild(balance);
+      card.className = ["usage-card", provider.available ? "" : "unavailable",
+        metered ? "usage-card--metered" : "", provider.stale ? "stale" : ""]
+        .filter(Boolean).join(" ");
+      const plan = provider.plan ? `<span>${escapeHtml(provider.plan)}</span>` : "";
+      const label = provider.label || provider.provider;
+      card.innerHTML = `<header><strong>${escapeHtml(label)}</strong>${plan}</header>`;
+      let balance;
+      if (metered) {
+        balance = balanceView(provider);
+        const row = document.createElement("div");
+        row.className = "usage-balance";
+        row.innerHTML = `<span>${escapeHtml(tr("usage_balance_label"))}</span><strong>${escapeHtml(balance.text)}</strong>`;
+        card.appendChild(row);
       }
-      if (!view.problem) {
+      if (!provider.available) {
+        const message = document.createElement("p");
+        message.textContent = provider.message;
+        card.appendChild(message);
+      } else {
         for (const window of provider.windows || []) card.appendChild(usageWindow(window));
         for (const metric of provider.metrics || []) {
           const row = document.createElement("div");
@@ -103,12 +84,12 @@ window.createJoeUsage = function createJoeUsage({
           row.innerHTML = `<span>${escapeHtml(metric.name)}</span><strong>${escapeHtml(metric.value)}</strong>`;
           card.appendChild(row);
         }
-      }
-      if (view.note) {
-        const message = document.createElement("p");
-        message.className = "usage-note";
-        message.innerHTML = `${quotaIcon(view.icon)}<span>${escapeHtml(view.note)}</span>`;
-        card.appendChild(message);
+        const note = balance?.note || provider.message;
+        if (note) {
+          const message = document.createElement("p");
+          message.textContent = note;
+          card.appendChild(message);
+        }
       }
       target.appendChild(card);
     }
@@ -191,7 +172,7 @@ window.createJoeUsage = function createJoeUsage({
 
   return {
     usageDescription,
-    usageCardView,
+    balanceView,
     formatPercent,
     loadUsage,
     renderUsage,

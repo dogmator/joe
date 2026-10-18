@@ -513,6 +513,22 @@ def test_unsafe_credential_file_is_rejected_by_doctor_before_spawn(profile, tmp_
     assert not result.ok
 
 
+def test_reviewer_effort_is_forwarded_only_when_its_model_declares_it(monkeypatch):
+    import time
+
+    from joe.orchestrator_workflows import stage_effort
+
+    monkeypatch.setattr(capabilities, "_cache", (time.monotonic(), {
+        "codex": {"models": [{"id": "gpt-fixture", "efforts": ["low", "high"]}], "efforts": []},
+        "claude": {"models": [], "efforts": ["low", "high"]},
+        "deepseek": {"models": [{"id": "deepseek-flash", "efforts": ["high"]}]},
+    }))
+    assert stage_effort("codex", "gpt-fixture", "high") == "high"
+    assert stage_effort("codex", "gpt-fixture", "max") is None
+    assert stage_effort("claude", "claude-opus-5-5", "high") == "high"
+    assert stage_effort("deepseek", "deepseek-flash", "high") is None
+
+
 @pytest.mark.parametrize("primary,reviewer", [("codex", "deepseek"), ("deepseek", "codex")])
 def test_review_uses_separate_profile_defaults_and_keys(profile, tmp_path, monkeypatch, primary, reviewer):
     from joe.orchestrator import Orchestrator

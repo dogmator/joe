@@ -14,8 +14,8 @@ _CLAUDE_RATES = {
     "haiku": (1.0, 5.0),
     "fable": (10.0, 50.0),
 }
-# Conservative peak reference rates, USD / million tokens; never a bill.
-# https://api-docs.deepseek.com/quick_start/pricing/ (checked 2026-10-18).
+# Tarifs de pointe conservateurs, USD / million de tokens ; jamais une facture.
+# https://api-docs.deepseek.com/quick_start/pricing/ (verifie le 2026-10-18).
 _DEEPSEEK_RATES = {
     "deepseek-flash": (0.006, 0.3, 1.2),
     "deepseek-v4-pro": (0.044, 1.32, 3.96),
@@ -115,7 +115,7 @@ def parse_provider_usage(provider: str, output: str, model: str | None = None) -
         "deepseek-flash" if provider == "deepseek" else None
     ))
     cost, cost_status = None, "unknown"
-    if provider == "claude":
+    if provider in {"claude", "antigravity"}:
         cost, cost_status = _cost(totals, resolved_model, direct_cost)
     elif provider == "deepseek" and resolved_model in _DEEPSEEK_RATES:
         hit, miss, output_rate = _DEEPSEEK_RATES[resolved_model]
@@ -143,7 +143,7 @@ def parse_provider_usage(provider: str, output: str, model: str | None = None) -
 
 
 def usage_token_count(usage: dict[str, Any]) -> int:
-    """Count inclusive Codex input/output once, retaining legacy summaries."""
+    """Compter une fois l'entree/sortie inclusive de Codex, avec les anciens resumes."""
     if isinstance(usage.get("total_tokens"), (int, float)):
         return _number(usage["total_tokens"])
     return sum(_number(usage.get(key)) for key in (

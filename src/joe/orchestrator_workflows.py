@@ -62,6 +62,28 @@ def stage_model(orchestrator, provider: str, stage: str, fallback: str | None) -
     return select_model_tier(provider, tier) or fallback
 
 
+def stage_effort(provider: str, model: str | None, effort: str | None) -> str | None:
+    """L'effort d'une etape, seulement s'il est declare pour son modele.
+
+    Un fournisseur manuel garde ses propres valeurs par defaut : le niveau
+    choisi pour l'auteur ne decrit pas la passe independante. Pour les autres,
+    l'effort demande est transmis tant que le catalogue de l'etape le
+    reconnait ; une valeur inconnue revient au defaut du modele.
+    """
+    if not effort or get_provider_spec(provider).manual_only:
+        return None
+    from .capabilities import cached_provider_capabilities, provider_capabilities
+
+    capabilities = cached_provider_capabilities() or provider_capabilities()
+    entry = capabilities.get(provider, {})
+    selected = next(
+        (item for item in entry.get("models", []) if item.get("id") == model),
+        {},
+    )
+    allowed = selected.get("efforts") or entry.get("efforts") or []
+    return effort if effort in allowed else None
+
+
 def clean_report(text: str) -> str:
     """Remove only generic internal-validation refusal sections from agent prose."""
     if not text:
@@ -221,14 +243,15 @@ def run_review_workflow(
         "running",
     )
     before_examination = snapshot(orchestrator.project)
+    review_model = stage_model(orchestrator, reviewer, "review", None)
     review = orchestrator._run_with_fallback(
         reviewer,
         review_request,
         Intent.MODIFY if examines else Intent.ANALYZE,
         results,
         exclude={primary.provider},
-        model=stage_model(orchestrator, reviewer, "review", None),
-        effort=None,
+        model=review_model,
+        effort=stage_effort(reviewer, review_model, effort) if examines else None,
         # Les memes droits que l'auteur, jamais plus : si la demande etait en
         # lecture seule, l'examen l'est aussi.
         execution_mode=execution_mode if examines else None,

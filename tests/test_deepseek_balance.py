@@ -45,8 +45,8 @@ def test_balance_uses_protected_key_official_endpoint_and_total(credentials, mon
     assert result["balance_usd"] == 4.5
     assert result["amount"] == 4.5
     assert result["currency"] == "USD"
-    assert result["available"] is True
-    assert result["is_available"] is True
+    assert result["data_available"] is True
+    assert result["funds_sufficient"] is True
     request, timeout = calls[0]
     assert request.full_url == "https://api.deepseek.com/user/balance"
     assert request.get_method() == "GET"
@@ -59,15 +59,15 @@ def test_balance_uses_protected_key_official_endpoint_and_total(credentials, mon
 def test_zero_or_negative_balance_is_real_data_not_a_network_failure(credentials, monkeypatch, amount, is_available):
     respond(monkeypatch, payload(amount, available=is_available))
     result = deepseek_profile.fetch_deepseek_balance()
-    assert result["available"] is True
+    assert result["data_available"] is True
     assert result["balance_usd"] == float(amount)
-    assert result["is_available"] is False
+    assert result["funds_sufficient"] is False
 
 
 def test_cny_is_not_labelled_or_converted_to_usd(credentials, monkeypatch):
     respond(monkeypatch, payload("12.34", "CNY"))
     result = deepseek_profile.fetch_deepseek_balance()
-    assert result["available"]
+    assert result["data_available"]
     assert result["currency"] == "CNY"
     assert result["amount"] == 12.34
     assert result["balance_usd"] is None
@@ -94,7 +94,7 @@ def test_balance_failure_is_a_safe_unknown_value(credentials, monkeypatch, error
     result = deepseek_profile.fetch_deepseek_balance()
     assert result["balance_usd"] is None
     assert result["amount"] is None
-    assert result["available"] is False
+    assert result["data_available"] is False
     assert result["error_kind"] == kind
     assert result["http_status"] == status
     assert "synthetic-balance-token" not in json.dumps(result)
@@ -107,7 +107,7 @@ def test_balance_failure_is_a_safe_unknown_value(credentials, monkeypatch, error
 def test_malformed_balance_is_not_zero(credentials, monkeypatch, response):
     respond(monkeypatch, response)
     result = deepseek_profile.fetch_deepseek_balance()
-    assert result["available"] is False
+    assert result["data_available"] is False
     assert result["balance_usd"] is None
     assert result["error_kind"] == "invalid_response"
 
@@ -116,7 +116,7 @@ def test_missing_credentials_do_not_make_a_request(credentials, monkeypatch):
     credentials.unlink()
     monkeypatch.setattr(deepseek_profile, "build_opener", lambda *args: pytest.fail("must not request without credentials"))
     result = deepseek_profile.fetch_deepseek_balance()
-    assert not result["available"]
+    assert not result["data_available"]
     assert result["error_kind"] == "credentials"
 
 
@@ -152,7 +152,7 @@ def test_real_http_client_handles_local_responses_without_following_redirects(cr
     monkeypatch.setattr(deepseek_profile, "_BALANCE_URL", f"http://127.0.0.1:{server.server_port}/user/balance")
     try:
         result = deepseek_profile.fetch_deepseek_balance()
-        assert result["available"] is (status == 200)
+        assert result["data_available"] is (status == 200)
         assert received == [("/user/balance", "Bearer synthetic-balance-token")]
         if status != 200:
             assert result["http_status"] == status
@@ -168,7 +168,7 @@ def test_balance_refresh_uses_usage_cache_and_does_not_change_provider_readiness
 
     calls = []
     unknown = {"balance_usd": None, "amount": None, "currency": None,
-               "available": False, "is_available": None, "error_kind": "network", "http_status": None}
+               "data_available": False, "funds_sufficient": None, "error_kind": "network", "http_status": None}
     monkeypatch.setattr(deepseek_profile, "setup_error", lambda: None)
     monkeypatch.setattr("joe.providers.resolve_executable", lambda name: "/fixture/codex")
     monkeypatch.setattr(deepseek_profile, "fetch_deepseek_balance", lambda: calls.append(1) or dict(unknown))
@@ -180,7 +180,7 @@ def test_balance_refresh_uses_usage_cache_and_does_not_change_provider_readiness
         status = next(p for p in usage.usage_status(force=force) if p["provider"] == "deepseek")
         assert status["available"] is True
         assert status["availability_state"] == "quota_unknown"
-        assert status["balance"]["available"] is False
+        assert status["balance"]["data_available"] is False
         assert status["windows"] == []
     assert len(calls) == 2
 

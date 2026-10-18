@@ -1,4 +1,4 @@
-"""DeepSeek API semantics, separate from the reusable Codex JSON transport."""
+"""Semantique de l'API DeepSeek, distincte du transport JSON de Codex."""
 from __future__ import annotations
 
 from dataclasses import replace

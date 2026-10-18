@@ -61,8 +61,6 @@ def usage_status(force: bool = False) -> list[dict[str, Any]]:
         _refresh_claude_status() if force else _claude_status(),
         {
             "provider": "antigravity",
-            "quota_display": "cli_unsupported",
-            "installed": antigravity_installed,
             "available": antigravity_installed,
             "availability_state": (
                 "quota_unknown" if antigravity_installed else "unavailable"
@@ -75,10 +73,10 @@ def usage_status(force: bool = False) -> list[dict[str, Any]]:
                 else "Antigravity CLI non installée"
             ),
         },
-        {
-            **_unavailable("copilot", "Disponible uniquement dans la session interactive Copilot"),
-            "quota_display": "interactive_only", "installed": bool(shutil.which("copilot")),
-        },
+        _unavailable(
+            "copilot",
+            "Disponible uniquement dans la session interactive Copilot",
+        ),
         _deepseek_status(),
     ]
     with _lock:
@@ -97,7 +95,8 @@ def cached_usage_status() -> list[dict[str, Any]]:
 
 
 def _deepseek_status() -> dict[str, Any]:
-    # API balance is not a Codex subscription window. Never probe a paid model.
+    # Le solde d'API n'est pas une fenetre d'abonnement Codex. On ne sonde
+    # jamais un modele facture pour l'obtenir.
     from .deepseek_profile import fetch_deepseek_balance, setup_error
     from .providers import resolve_executable
 
@@ -139,7 +138,7 @@ def _quota_observation_invalid(status: dict[str, Any], now: float) -> bool:
 
 
 def routing_usage_status() -> list[dict[str, Any]]:
-    """Obtain one routing snapshot using the existing cache/freshness rules."""
+    """Obtenir un instantane de routage avec les regles de cache existantes."""
     statuses = usage_status()
     now = time.time()
     if any(
@@ -161,8 +160,8 @@ def routing_usage_status() -> list[dict[str, Any]]:
         if item.get("provider") in {"claude", "codex"} and _quota_observation_invalid(
             item, time.time()
         ):
-            # Diagnostic fallback is evidence, never current capacity. None
-            # preserves Joe's existing unknown-quota admission semantics.
+            # Le repli diagnostique est une preuve, jamais une capacite
+            # actuelle. None preserve la semantique existante de quota inconnu.
             result.update(
                 last_observation=dict(item), windows=[], available=None,
                 availability_state="quota_unknown", stale=True,
@@ -695,9 +694,9 @@ def _refresh_claude_status(timeout: int = 18) -> dict[str, Any]:
             observed_at = local.get("observed_at")
             if isinstance(observed_at, (int, float)) and observed_at >= started_at:
                 current_windows = local.get("windows") or []
-                # A structured reply fetched during this refresh owns the
-                # exact resets. Replace its text-rendered counterparts, while
-                # retaining every additional source row and any text-only data.
+                # Une reponse structuree obtenue pendant cette actualisation
+                # possede les resets exacts. On remplace ses equivalents rendus
+                # en texte, en gardant les autres lignes et les donnees texte.
                 status["windows"] = [
                     window for window in status["windows"]
                     if not any(
@@ -711,8 +710,8 @@ def _refresh_claude_status(timeout: int = 18) -> dict[str, Any]:
                     )
                 ] + current_windows
                 return status
-            # /usage can update the structured cache with rows its text view
-            # omits. Keep those rows in the same routing snapshot.
+            # /usage peut enrichir le cache structure de lignes absentes de sa
+            # vue texte. On les conserve dans le meme instantane de routage.
             for window in local.get("windows") or []:
                 if not window.get("provider_limit"):
                     continue

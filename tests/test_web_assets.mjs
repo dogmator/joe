@@ -540,50 +540,37 @@ function quotaView(provider) {
   const usage = window.createJoeUsage({
     state: {}, translate: (key, params) => translate("en", key, params)
   });
-  return usage.usageCardView(provider);
+  return usage.balanceView(provider);
 }
-
-test("known quota limitations are neutral states even when quota availability is false", () => {
-  const cli = quotaView({ provider: "antigravity", quota_display: "cli_unsupported", available: true });
-  assert.equal(cli.problem, false);
-  assert.equal(cli.badge, "CLI limitation");
-  assert.match(cli.note, /does not expose quota/i);
-  const interactive = quotaView({ provider: "copilot", quota_display: "interactive_only", available: false, installed: true });
-  assert.equal(interactive.problem, false);
-  assert.equal(interactive.badge, "Interactive only");
-  assert.match(interactive.note, /interactive Copilot session/);
-});
 
 test("DeepSeek displays account money in its actual currency, including a real zero", () => {
   const base = { provider: "deepseek", quota_display: "token_billing", available: true };
-  const usd = quotaView({ ...base, balance: { available: true, currency: "USD", amount: 4.5, is_available: true } });
-  assert.equal(usd.balanceText, "$4.50");
-  assert.equal(usd.badge, "Pay per token");
-  const zero = quotaView({ ...base, balance: { available: true, currency: "USD", amount: 0, is_available: false } });
-  assert.equal(zero.balanceText, "$0.00");
+  const usd = quotaView({ ...base, balance: { data_available: true, currency: "USD", amount: 4.5, funds_sufficient: true } });
+  assert.equal(usd.text, "$4.50");
+  assert.equal(usd.note, "");
+  const zero = quotaView({ ...base, balance: { data_available: true, currency: "USD", amount: 0, funds_sufficient: false } });
+  assert.equal(zero.text, "$0.00");
   assert.match(zero.note, /insufficient/i);
-  const cny = quotaView({ ...base, balance: { available: true, currency: "CNY", amount: 12.34 } });
-  assert.match(cny.balanceText, /12\.34/);
-  assert.doesNotMatch(cny.balanceText, /\$/);
+  const cny = quotaView({ ...base, balance: { data_available: true, currency: "CNY", amount: 12.34 } });
+  assert.match(cny.text, /12\.34/);
+  assert.doesNotMatch(cny.text, /\$/);
 });
 
 test("a failed balance lookup is unknown money, not a broken agent or a fake zero", () => {
   const base = { provider: "deepseek", quota_display: "token_billing", available: true };
-  for (const balance of [null, { available: false, error_kind: "network" }, { available: true, amount: NaN }]) {
+  for (const balance of [null, { data_available: false, error_kind: "network" }, { data_available: true, amount: NaN }]) {
     const view = quotaView({ ...base, balance });
-    assert.equal(view.problem, false);
-    assert.equal(view.balanceText, "Unavailable");
-    assert.doesNotMatch(view.balanceText, /0\.00/);
+    assert.equal(view.text, "Unavailable");
+    assert.doesNotMatch(view.text, /0\.00/);
   }
-  const auth = quotaView({ ...base, balance: { available: false, error_kind: "authentication", http_status: 401 } });
+  const auth = quotaView({ ...base, balance: { data_available: false, error_kind: "authentication", http_status: 401 } });
   assert.match(auth.note, /401.*API key/);
 });
 
-test("real provider failures and missing setup take precedence over informational badges", () => {
-  const info = { provider: "antigravity", quota_display: "cli_unsupported" };
-  assert.equal(quotaView({ ...info, installed: false }).problem, true);
-  assert.equal(quotaView({ ...info, error_kind: "authentication", error_message: "HTTP 401" }).note, "HTTP 401");
-  assert.equal(quotaView({ ...info, setup_required: "Set up credentials" }).problem, true);
-  assert.equal(quotaView({ provider: "codex", available: null }).problem, false);
-  assert.equal(quotaView({ provider: "codex", available: false }).problem, true);
+test("the reviewer menu excludes the currently selected agent", () => {
+  const source = readFileSync(new URL("../src/joe/web_assets/app.js", import.meta.url), "utf8");
+  const menu = source.split("function updateReviewerMenu(")[1].split("\n}")[0];
+  assert.match(menu, /provider\.id\) !== agent/);
+  assert.match(menu, /reviewer !== agent/);
+  assert.match(menu, /providerMenuItems\(candidates, reviewer\)/);
 });

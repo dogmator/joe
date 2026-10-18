@@ -258,8 +258,8 @@ class Provider:
         if effort:
             command.extend(["--config", f'model_reasoning_effort="{effort}"'])
         if self.remote_access and sandbox == "workspace-write":
-            # exec's --config list replaces the global list in Codex. Keep
-            # networking here so connection and effort overrides survive.
+            # La liste --config de exec remplace la liste globale de Codex.
+            # On garde le reseau ici pour preserver connexion et effort.
             command.extend(
                 ["--config", "sandbox_workspace_write.network_access=true"]
             )
@@ -519,6 +519,17 @@ class Provider:
                     process.stdin.close()
                 except BrokenPipeError:
                     pass
+        except (OSError, ValueError):
+            if process is not None:
+                _stop_process(process, force=True)
+            # Une exception OS ou d'encodage peut contenir argv ou
+            # l'environnement : on renvoie un diagnostic fixe, sans message.
+            return ProviderResult(
+                self.name, [_redact_values(part, secret_values) for part in command],
+                "", "Provider process could not be started", 127,
+                time.monotonic() - start, error_kind="unavailable",
+            )
+        try:
             stdout, stderr = _collect_streams(
                 process,
                 timeout,
@@ -580,16 +591,6 @@ class Provider:
                 time.monotonic() - start,
                 error_kind="cancelled",
                 usage=parse_provider_usage(self.name, partial, model),
-            )
-        except (OSError, ValueError):
-            if process is not None:
-                _stop_process(process, force=True)
-            # An OS/encoding exception can embed argv or environment values.
-            # Return a fixed diagnostic rather than propagating its message.
-            return ProviderResult(
-                self.name, [_redact_values(part, secret_values) for part in command],
-                "", "Provider process could not be started or read", 127,
-                time.monotonic() - start, error_kind="unavailable",
             )
 
 

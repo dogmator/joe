@@ -122,6 +122,23 @@ function providerMenuItems(providers, selected) {
   });
 }
 
+function updateReviewerMenu(providers) {
+  // Le relecteur doit etre independant : on retire l'agent actuellement
+  // choisi, pour qu'un fournisseur ne puisse pas relire son propre travail.
+  const agent = $("agent").value;
+  const reviewer = $("reviewer").value;
+  const candidates = providers.filter(provider =>
+    (typeof provider === "string" ? provider : provider.id) !== agent
+  );
+  setOptions($("reviewer"), [
+    { id: "", label: t("automatic") }, ...providerMenuItems(candidates, reviewer)
+  ]);
+  if (reviewer && reviewer !== agent) {
+    $("reviewer").value = reviewer;
+  }
+  refreshSelectMenu($("reviewer"));
+}
+
 function updateProviderMenu(providers) {
   // Le statut est relu toutes les cinq secondes. Reconstruire le menu a chaque
   // fois remettait la sélection à zéro puis la restaurait — mais le menu
@@ -142,14 +159,7 @@ function updateProviderMenu(providers) {
   // `setOptions` a rafraîchi le menu visible avant que la valeur ne soit
   // remise : sans ce second passage, l'affichage contredit la sélection.
   refreshSelectMenu($("agent"));
-  const reviewer = $("reviewer").value;
-  setOptions($("reviewer"), [
-    { id: "", label: t("automatic") }, ...providerMenuItems(providers, reviewer)
-  ]);
-  if ([...$("reviewer").options].some(option => option.value === reviewer)) {
-    $("reviewer").value = reviewer;
-  }
-  refreshSelectMenu($("reviewer"));
+  updateReviewerMenu(providers);
   // Le modèle dépend de l'agent : si la reconstruction a perdu la sélection,
   // la liste des modèles doit suivre au lieu de rester sur l'ancienne.
   if ($("agent").value !== selected) updateCapabilityMenus();
@@ -2186,6 +2196,7 @@ $("request").addEventListener("keydown", event => {
 });
 $("agent").addEventListener("change", () => {
   updateCapabilityMenus();
+  updateReviewerMenu(state.providerCatalog || []);
   saveSettings();
 });
 $("model").addEventListener("change", () => {

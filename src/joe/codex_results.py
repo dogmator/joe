@@ -1,4 +1,4 @@
-"""Read terminal Codex JSON events before the final answer replaces JSONL."""
+"""Lire les evenements JSON terminaux de Codex avant le remplacement JSONL."""
 from __future__ import annotations
 
 import json
