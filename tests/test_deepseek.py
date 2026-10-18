@@ -267,7 +267,7 @@ def test_web_decision_honours_flash_high_defaults(profile, tmp_path, monkeypatch
     from joe.orchestrator import Orchestrator
     from joe.web_runs import RunManager
 
-    monkeypatch.setattr("joe.web_runs.cached_usage_status", lambda: [])
+    monkeypatch.setattr("joe.web_runs.routing_usage_status", lambda: [])
     manager = RunManager(tmp_path)
     manager.orchestrator = Orchestrator(
         tmp_path, providers={"deepseek": Provider("deepseek", sys.executable)}

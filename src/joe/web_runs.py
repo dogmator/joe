@@ -52,8 +52,8 @@ from .skills import create_skill
 from .tasks import TaskStore
 from .usage import (
     _next_quota_reset,
-    cached_usage_status,
     next_window_reset,
+    routing_usage_status,
     usage_status,
 )
 from .worktrees import Worktree, WorktreeError, WorktreeManager
@@ -667,6 +667,7 @@ class RunManager:
                 local_payload=dict(local_payload or {}),
             )
 
+        statuses = routing_usage_status()
         if classification is None and os.environ.get(
             "JOE_DISABLE_LLM_ROUTER"
         ) != "1" and not reviewer:
@@ -685,7 +686,7 @@ class RunManager:
                 request,
                 baseline,
                 orchestrator.providers,
-                cached_usage_status(),
+                statuses,
                 workspace,
                 forced_agent=bool(effective_agent),
                 forced_mode=forced_mode is not None,
@@ -693,7 +694,7 @@ class RunManager:
         resolved = resolve_route(
             self.orchestrator.router,
             request,
-            cached_usage_status(),
+            statuses,
             forced_agent=effective_agent,
             forced_mode=forced_mode,
             forced_reviewer=reviewer,
@@ -716,7 +717,7 @@ class RunManager:
             model = model or select_model_tier(
                 route.primary,
                 _tier_under_quota_pressure(
-                    route.primary, classification.model_tier
+                    route.primary, classification.model_tier, statuses
                 ),
             )
         else:
@@ -726,7 +727,7 @@ class RunManager:
             tier, default_effort = _route_tier(request, route)
             effort = effort or default_effort
             model = model or select_model_tier(
-                route.primary, _tier_under_quota_pressure(route.primary, tier)
+                route.primary, _tier_under_quota_pressure(route.primary, tier, statuses)
             )
         if "health-check" in route.reason:
             effort = effort or "low"
@@ -3077,9 +3078,11 @@ QUOTA_PRESSURE_PERCENT = 20.0
 _TIER_LADDER = ("light", "standard", "strong")
 
 
-def _remaining_percent(provider: str) -> float | None:
+def _remaining_percent(
+    provider: str, statuses: list[dict[str, Any]] | None = None,
+) -> float | None:
     """Le plus petit reste connu parmi les fenetres de ce fournisseur."""
-    for item in usage_status(force=False):
+    for item in statuses if statuses is not None else routing_usage_status():
         if str(item.get("provider")) != provider:
             continue
         valeurs = [
@@ -3091,7 +3094,9 @@ def _remaining_percent(provider: str) -> float | None:
     return None
 
 
-def _tier_under_quota_pressure(provider: str, tier: str) -> str:
+def _tier_under_quota_pressure(
+    provider: str, tier: str, statuses: list[dict[str, Any]] | None = None,
+) -> str:
     """Descendre d'un cran quand la reserve du fournisseur s'epuise.
 
     L'information etait lue depuis longtemps pour choisir un fournisseur, mais
@@ -3103,7 +3108,10 @@ def _tier_under_quota_pressure(provider: str, tier: str) -> str:
     """
     if tier not in _TIER_LADDER or tier == "light":
         return tier
-    remaining = _remaining_percent(provider)
+    remaining = (
+        _remaining_percent(provider) if statuses is None
+        else _remaining_percent(provider, statuses)
+    )
     if remaining is None or remaining >= QUOTA_PRESSURE_PERCENT:
         return tier
     return _TIER_LADDER[_TIER_LADDER.index(tier) - 1]

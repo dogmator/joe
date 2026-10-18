@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 import uuid
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from .models import Mode, Route
 from .provider_health import apply_cooldowns
 from .provider_registry import counterpart, usage_providers, get_provider_spec
 from .usage_claude import (
+    CLAUDE_STALE_SECONDS,
+    claude_unscoped_limit,
     claude_account_plan as _claude_account_plan,
     claude_reset_timestamp as _claude_reset_timestamp,
     claude_status as _claude_status_impl,
@@ -79,7 +82,10 @@ def usage_status(force: bool = False) -> list[dict[str, Any]]:
         _deepseek_status(),
     ]
     with _lock:
-        providers = [_with_last_available(item) for item in fresh]
+        providers = [
+            item if force and item.get("stale") else _with_last_available(item)
+            for item in fresh
+        ]
         _cache = (time.monotonic(), providers)
         return apply_cooldowns(providers)
 
@@ -107,6 +113,67 @@ def _deepseek_status() -> dict[str, Any]:
         "message": issue or ("DeepSeek API: solde et reprise inconnus, facturation par token"
                              if installed else "Codex CLI non installée"),
     }
+
+
+def _quota_observation_invalid(status: dict[str, Any], now: float) -> bool:
+    if status.get("stale") or status.get("refresh_required"):
+        return True
+    observed_at = status.get("observed_at")
+    if (
+        status.get("provider") == "claude"
+        and isinstance(observed_at, (int, float))
+        and now - observed_at > CLAUDE_STALE_SECONDS
+    ):
+        return True
+    return any(
+        (
+            isinstance(window.get("resets_at"), (int, float))
+            and float(window["resets_at"]) <= now
+        ) or (
+            status.get("provider") == "claude"
+            and isinstance(window.get("observed_at"), (int, float))
+            and now - window["observed_at"] > CLAUDE_STALE_SECONDS
+        )
+        for window in status.get("windows") or []
+    )
+
+
+def routing_usage_status() -> list[dict[str, Any]]:
+    """Obtain one routing snapshot using the existing cache/freshness rules."""
+    statuses = usage_status()
+    now = time.time()
+    if any(
+        item.get("provider") in {"claude", "codex"}
+        and (
+            _quota_observation_invalid(item, now)
+            or (
+                item.get("provider") == "claude"
+                and not item.get("windows")
+                and shutil.which("claude")
+            )
+        )
+        for item in statuses
+    ):
+        statuses = usage_status(force=True)
+    snapshot = []
+    for item in statuses:
+        result = deepcopy(item)
+        if item.get("provider") in {"claude", "codex"} and _quota_observation_invalid(
+            item, time.time()
+        ):
+            # Diagnostic fallback is evidence, never current capacity. None
+            # preserves Joe's existing unknown-quota admission semantics.
+            result.update(
+                last_observation=dict(item), windows=[], available=None,
+                availability_state="quota_unknown", stale=True,
+                message="Current quota unknown; refresh did not establish valid capacity",
+            )
+            result["limit_observations"] = [
+                {**observation, "governing": False, "reason": "Quota observation is stale"}
+                for observation in item.get("limit_observations", [])
+            ]
+        snapshot.append(result)
+    return apply_cooldowns(snapshot)
 
 
 def record_gemini_usage(
@@ -151,10 +218,10 @@ def _with_last_available(status: dict[str, Any]) -> dict[str, Any]:
             retained = _without_expired_windows(previous[1], time.time())
             if retained.get("available"):
                 age = now - previous[0]
-                retained["stale"] = age > 15 * 60
+                retained["stale"] = age > CLAUDE_STALE_SECONDS
                 retained["message"] = (
                     "Dernière actualisation /usage Claude"
-                    if age <= 15 * 60
+                    if age <= CLAUDE_STALE_SECONDS
                     else "Dernière actualisation /usage Claude · mesure ancienne"
                 )
                 return retained
@@ -188,6 +255,7 @@ def _without_expired_windows(
         return status
     result = dict(status)
     result["windows"] = valid
+    result["refresh_required"] = True
     result["available"] = bool(valid)
     if not valid:
         result["message"] = "Quota expiré · actualisation en attente"
@@ -606,10 +674,11 @@ def _claude_status(path: Path | None = None) -> dict[str, Any]:
 
 def _refresh_claude_status(timeout: int = 18) -> dict[str, Any]:
     plan = _local_claude_plan() or _claude_account_plan()
+    started_at = time.time()
     def parse_screen(output: str) -> Any:
         return _parse_claude_usage_screen(output, plan=plan)
 
-    return _refresh_claude_status_impl(
+    status = _refresh_claude_status_impl(
         timeout,
         refresh_via_tmux=_refresh_claude_via_tmux,
         parse_screen=parse_screen,
@@ -618,6 +687,57 @@ def _refresh_claude_status(timeout: int = 18) -> dict[str, Any]:
         os_module=os,
         time_module=time,
     )
+    if not status.get("stale") and status.get("available"):
+        local = _claude_status()
+        observations = local.get("limit_observations", [])
+        status["limit_observations"] = observations
+        if not local.get("stale"):
+            observed_at = local.get("observed_at")
+            if isinstance(observed_at, (int, float)) and observed_at >= started_at:
+                current_windows = local.get("windows") or []
+                # A structured reply fetched during this refresh owns the
+                # exact resets. Replace its text-rendered counterparts, while
+                # retaining every additional source row and any text-only data.
+                status["windows"] = [
+                    window for window in status["windows"]
+                    if not any(
+                        claude_unscoped_limit(current.get("scope"))
+                        and (
+                            current.get("source_key") in {"five_hour", "seven_day"}
+                            or current.get("kind") in {"session", "weekly_all"}
+                        )
+                        and current.get("duration_minutes") == window.get("duration_minutes")
+                        for current in current_windows
+                    )
+                ] + current_windows
+                return status
+            # /usage can update the structured cache with rows its text view
+            # omits. Keep those rows in the same routing snapshot.
+            for window in local.get("windows") or []:
+                if not window.get("provider_limit"):
+                    continue
+                duplicate = next((existing for existing in status["windows"] if all(
+                    existing.get(key) == window.get(key)
+                    for key in ("scope", "duration_minutes", "remaining_percent", "resets_at")
+                )), None)
+                if duplicate is None:
+                    status["windows"].append(window)
+                else:
+                    duplicate.update({key: value for key, value in window.items() if key != "name"})
+        else:
+            status["limit_observations"] = [
+                {**observation, "governing": False, "reason": "Structured cache is stale"}
+                for observation in observations
+            ]
+            if any(
+                observation.get("applicable")
+                and not claude_unscoped_limit(observation.get("scope"))
+                and isinstance(observation.get("is_active"), bool)
+                for observation in observations
+            ):
+                status["stale"] = True
+                status["message"] = "Claude /usage refreshed; structured limits remain stale"
+    return status
 
 
 def _refresh_claude_via_tmux(timeout: int) -> dict[str, Any] | None:

@@ -87,7 +87,7 @@ def test_reserved_unknown_balance_failure_stops_web_run_instead_of_waiting(tmp_p
 
     record_result(failed("insufficient_balance", 402))
     statuses = apply_cooldowns([{"provider": "deepseek", "available": True, "windows": []}])
-    monkeypatch.setattr("joe.web_runs.cached_usage_status", lambda: statuses)
+    monkeypatch.setattr("joe.web_runs.routing_usage_status", lambda: statuses)
     manager = RunManager(tmp_path)
     conversation = manager.conversations.create()
     manager.conversations.update_project(conversation["project_id"], {"quota_provider": "deepseek"})
