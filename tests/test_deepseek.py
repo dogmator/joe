@@ -508,3 +508,59 @@ def test_unsafe_credential_file_is_rejected_by_doctor_before_spawn(profile, tmp_
     assert report["providers"][0]["runtime_issue"]
     result = Provider("deepseek", sys.executable).run("hello", tmp_path, Intent.ANSWER, 3)
     assert not result.ok
+
+
+@pytest.mark.parametrize("primary,reviewer", [("codex", "deepseek"), ("deepseek", "codex")])
+def test_review_uses_separate_profile_defaults_and_keys(profile, tmp_path, monkeypatch, primary, reviewer):
+    from joe.orchestrator import Orchestrator
+    import time
+
+    monkeypatch.setenv("OPENAI_API_KEY", "ordinary-openai-key")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "ordinary-codex"))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr(capabilities, "_cache", (time.monotonic(), {
+        "codex": {"models": [{"id": "gpt-fixture", "default_effort": "medium"}]},
+        "deepseek": {"models": [{"id": "deepseek-flash", "default_effort": "high"}]},
+    }))
+    script = tmp_path / "review-jsonl.py"
+    script.write_text(
+        "import json,os,sys\n"
+        "provider=sys.argv[1]\n"
+        "if provider=='deepseek':\n"
+        " assert os.environ['DEEPSEEK_API_KEY']=='test-deepseek-key'\n"
+        " assert 'OPENAI_API_KEY' not in os.environ\n"
+        f" assert os.environ['CODEX_HOME']=={str(profile)!r}\n"
+        "else:\n"
+        " assert os.environ['OPENAI_API_KEY']=='ordinary-openai-key'\n"
+        " assert 'DEEPSEEK_API_KEY' not in os.environ\n"
+        f" assert os.environ['CODEX_HOME']=={str(tmp_path / 'ordinary-codex')!r}\n"
+        "sys.stdin.read()\n"
+        "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'Complete fixture report.'}}))\n"
+        "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':20,'output_tokens':5}}))\n"
+    )
+    calls = []
+
+    class ReviewFixture(Provider):
+        def command(self, prompt, cwd, intent, model=None, effort=None, execution_mode=None):
+            calls.append((self.name, model, effort, execution_mode))
+            return [sys.executable, str(script), self.name]
+
+    providers = {name: ReviewFixture(name, sys.executable) for name in (primary, reviewer)}
+    events = []
+    orchestrator = Orchestrator(tmp_path, providers=providers)
+    route = orchestrator.router.route(
+        "Implement fixture change", forced_agent=primary, forced_reviewer=reviewer,
+    )
+    before = dict(os.environ)
+    _, log = orchestrator.execute(
+        "Implement fixture change", route, model="deepseek-v4-pro" if primary == "deepseek" else "gpt-primary",
+        effort="max" if primary == "deepseek" else "xhigh", execution_mode="read-only", on_event=events.append,
+    )
+    assert calls[0][0] == primary
+    assert calls[1] == (reviewer, "deepseek-flash" if reviewer == "deepseek" else "gpt-fixture",
+                        "high" if reviewer == "deepseek" else "medium", "read-only")
+    assert dict(os.environ) == before
+    assert [event["provider"] for event in events if event["type"] == "provider_start"] == [primary, reviewer]
+    assert [event["provider"] for event in events if event["type"] == "usage"] == [primary, reviewer]
+    assert "test-deepseek-key" not in log.read_text()
+    assert "ordinary-openai-key" not in log.read_text()

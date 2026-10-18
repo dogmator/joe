@@ -24,6 +24,7 @@ class Route:
     primary: str
     reviewer: str | None = None
     reason: str = ""
+    explicit_reviewer: bool = False
 
 
 @dataclass

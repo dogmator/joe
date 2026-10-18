@@ -295,8 +295,18 @@ class Router:
         *,
         forced_agent: str | None = None,
         forced_mode: Mode | None = None,
+        forced_reviewer: str | None = None,
         previous_provider: str | None = None,
     ) -> Route:
+        if forced_reviewer:
+            if forced_reviewer not in get_provider_names():
+                raise ValueError("Unknown reviewer")
+            if forced_mode not in (None, Mode.REVIEW):
+                raise ValueError("An explicit reviewer requires REVIEW mode")
+            if self.available is not None and forced_reviewer not in self.available:
+                raise ValueError("The selected reviewer is unavailable; check provider setup")
+            if forced_agent == forced_reviewer:
+                raise ValueError("Executor and reviewer must be different providers")
         routing_text = _routing_text(request)
         lower = routing_text.lower()
         words = _tokens(routing_text)
@@ -421,6 +431,17 @@ class Router:
                 else ""
             )
         )
+        if forced_reviewer:
+            primary = self._usable(primary, allow_manual=bool(forced_agent)) or primary
+            if primary == forced_reviewer:
+                candidates = sorted(self.available if self.available is not None else get_provider_names())
+                primary = next((name for name in candidates
+                                if name != forced_reviewer
+                                and not get_provider_spec(name).manual_only), "")
+            if not primary or primary == forced_reviewer:
+                raise ValueError("No independent executor is available for this reviewer")
+            return Route(intent, Mode.REVIEW, primary, forced_reviewer,
+                         reason + "; explicit-reviewer", explicit_reviewer=True)
         mode, primary, reviewer, adjusted = self._fit(
             intent, mode, primary, reviewer, allow_manual=bool(forced_agent)
         )

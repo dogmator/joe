@@ -15,7 +15,7 @@ from .prompt_language import (
     response_language,
 )
 from .git_review import changed_paths, snapshot
-from .provider_registry import arbitration_order, counterpart
+from .provider_registry import arbitration_order, counterpart, get_provider_spec
 
 
 REPORT_RULES = (
@@ -54,7 +54,10 @@ def stage_model(orchestrator, provider: str, stage: str, fallback: str | None) -
     tier = STAGE_TIERS.get(stage)
     if not tier:
         return fallback
-    from .capabilities import select_model_tier
+    from .capabilities import provider_defaults, select_model_tier
+
+    if get_provider_spec(provider).manual_only:
+        return provider_defaults(provider)[0] or fallback
 
     return select_model_tier(provider, tier) or fallback
 
@@ -176,6 +179,7 @@ def run_review_workflow(
         implementation_request,
         route.intent,
         results,
+        exclude={route.reviewer} if route.explicit_reviewer and route.reviewer else None,
         model=model,
         effort=effort,
         execution_mode=execution_mode,
@@ -224,13 +228,14 @@ def run_review_workflow(
         results,
         exclude={primary.provider},
         model=stage_model(orchestrator, reviewer, "review", None),
-        effort=effort if examines else None,
+        effort=None,
         # Les memes droits que l'auteur, jamais plus : si la demande etait en
         # lecture seule, l'examen l'est aussi.
         execution_mode=execution_mode if examines else None,
         on_event=on_event,
         cancel_event=cancel_event,
         respect_cooldown=True,
+        allow_fallback=not route.explicit_reviewer,
     )
     workflow_event(
         on_event,

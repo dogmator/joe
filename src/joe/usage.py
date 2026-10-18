@@ -245,8 +245,9 @@ def admit_route(
         )
         for provider in usage_providers()
     }
-    if get_provider_spec(route.primary).manual_only:
-        capacity[route.primary] = _provider_capacity(by_provider.get(route.primary), threshold, timestamp)
+    for provider in (route.primary, route.reviewer):
+        if provider and get_provider_spec(provider).manual_only:
+            capacity[provider] = _provider_capacity(by_provider.get(provider), threshold, timestamp)
     constrained = {
         provider: detail
         for provider, (eligible, _, detail) in capacity.items()
