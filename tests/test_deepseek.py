@@ -434,6 +434,22 @@ def test_completed_turn_does_not_clear_error_when_process_fails(profile, tmp_pat
     assert codex_failure(output, 1) is not None
 
 
+@pytest.mark.parametrize("reconnect_after_failure", [False, True])
+def test_completed_turn_does_not_clear_terminal_failure(reconnect_after_failure):
+    from joe.codex_results import codex_failure
+
+    events = [{"type": "turn.failed", "error": {
+        "message": "HTTP 402: insufficient balance", "http_status": 402,
+    }}]
+    if reconnect_after_failure:
+        events.append({"type": "error", "message": "Reconnecting... 1/5"})
+    events.append({"type": "turn.completed"})
+    failure = codex_failure("\n".join(json.dumps(event) for event in events), 0)
+    assert failure is not None
+    assert failure.http_status == 402
+    assert failure.error_message == "HTTP 402: insufficient balance"
+
+
 def test_timeout_preserves_prior_usage_without_retaining_jsonl(profile, tmp_path):
     provider = jsonl_provider(tmp_path, [
         {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
