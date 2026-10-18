@@ -1,5 +1,8 @@
 import os
 import stat
+import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -18,20 +21,42 @@ def assert_mode(path, expected):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def warm_provider_catalogue():
-    """Interroger les CLI du poste une fois, avant le premier test.
+def offline_provider_clis(tmp_path_factory):
+    """Default tests use fixtures, never authenticated CLIs from the host.
 
-    `provider_capabilities` lance un sous-processus par fournisseur installe :
-    environ trois secondes a froid sur une machine complete. Ce cout tombait
-    sur le premier test a traverser un chemin de requete, dont le client
-    attend cinq secondes — et sous charge la limite etait franchie. Les tests
-    viraient au rouge selon la machine et non selon le code, dont un test
-    d'escalade de privileges qui echouait sur un timeout de socket alors que
-    le refus, lui, etait correct.
-
-    La chauffe se fait ici, hors de tout delai de client. Le contenu reste
-    celui du poste : on supprime la latence, pas la realite.
+    The existing live smoke test remains an explicit opt-in. Loopback HTTP
+    and Python/JSONL subprocess fixtures remain available to ordinary tests.
     """
+    if os.environ.get("JOE_LIVE_SMOKE") == "1":
+        yield
+        return
+    from joe.provider_registry import get_provider_specs
+
+    commands = {name for spec in get_provider_specs()
+                for name in (spec.name, *spec.executables)}
+    original_which, original_popen = shutil.which, subprocess.Popen
+    fixture_root = tmp_path_factory.getbasetemp().resolve()
+
+    def fixture_which(command, *args, **kwargs):
+        if Path(command).name.removesuffix(".exe") in commands:
+            return None
+        return original_which(command, *args, **kwargs)
+
+    def fixture_popen(args, *positional, **kwargs):
+        executable = kwargs.get("executable") or (args[0] if isinstance(args, (list, tuple)) else args)
+        path = Path(os.fsdecode(executable))
+        if path.name.removesuffix(".exe") in commands and not path.resolve().is_relative_to(fixture_root):
+            raise FileNotFoundError("Authenticated provider CLIs are disabled in the default test suite")
+        return original_popen(args, *positional, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(shutil, "which", fixture_which)
+        patch.setattr(subprocess, "Popen", fixture_popen)
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def warm_provider_catalogue(offline_provider_clis):
     from joe.capabilities import provider_capabilities
 
     provider_capabilities()
