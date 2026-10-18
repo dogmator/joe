@@ -22,15 +22,21 @@ def _field(value: Any, names: tuple[str, ...]) -> Any:
     return None
 
 
-def codex_failure(output: str) -> ProviderFailure | None:
+def codex_failure(output: str, returncode: int = 0) -> ProviderFailure | None:
     error: Any = None
     for line in output.splitlines():
         try:
             event = json.loads(line)
         except (ValueError, TypeError):
             continue
-        if isinstance(event, dict) and event.get("type") in {"error", "turn.failed"}:
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") in {"error", "turn.failed"}:
             error = event.get("error") or event
+        elif event.get("type") == "turn.completed" and returncode == 0:
+            # Un `error` de reconnexion n'est pas terminal : le tour qui se
+            # termine ensuite normalement l'emporte.
+            error = None
     if error is None:
         return None
     message = error if isinstance(error, str) else _field(error, ("message",))

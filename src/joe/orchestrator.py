@@ -95,7 +95,13 @@ def _freshness_context(observation: dict[str, object]) -> str:
 
 
 class OrchestrationError(RuntimeError):
-    pass
+    def __init__(
+        self, message: str, failures: tuple[tuple[str, str | None], ...] | None = None
+    ):
+        super().__init__(message)
+        # (provider, error_kind) des seules tentatives de l'étape qui a échoué :
+        # le message, lui, cite aussi les échecs déjà rattrapés plus tôt.
+        self.failures = failures
 
 
 class Orchestrator:
@@ -303,6 +309,7 @@ class Orchestrator:
         output_validator: Callable[[str], bool] | None = None,
     ) -> ProviderResult:
         config = self.memory.config()
+        first_attempt = len(results)
         candidates = [provider_name]
         if allow_fallback:
             candidates.extend(config["fallbacks"].get(provider_name, []))
@@ -444,7 +451,10 @@ class Orchestrator:
             f"{r.provider}:{r.error_kind}" + (f" ({r.error_message})" if r.error_message else "")
             for r in results
         )
-        raise OrchestrationError(f"All providers failed ({errors})")
+        raise OrchestrationError(
+            f"All providers failed ({errors})",
+            tuple((r.provider, r.error_kind) for r in results[first_attempt:]),
+        )
 
     @staticmethod
     def _health_check_prompt(request: str, provider: str) -> str:

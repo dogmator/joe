@@ -4,7 +4,10 @@ window.createJoeUsage = function createJoeUsage({
   const tr = (key, params) => translate ? translate(key, params) : key;
   function usageDescription(usage) {
     const tokens = usage.total_tokens ?? ((usage.input_tokens || 0) + (usage.output_tokens || 0));
-    if (usage.cost_status === "estimated_deepseek_api" && typeof usage.cost_usd === "number") {
+    // Older DeepSeek summaries were saved with a provider-specific status.
+    const deepseekEstimate = usage.cost_status === "estimated_deepseek_api"
+      || (usage.cost_status === "estimated_api" && (usage.cost_provider || usage.provider) === "deepseek");
+    if (deepseekEstimate && typeof usage.cost_usd === "number") {
       return tr("deepseek_usage_estimate", { cost: usage.cost_usd.toFixed(6), tokens });
     }
     return tr("usage_tokens_count", { tokens });

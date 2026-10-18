@@ -42,7 +42,7 @@ def offline_provider_clis(tmp_path_factory):
     fixture_root = tmp_path_factory.getbasetemp().resolve()
 
     def fixture_which(command, *args, **kwargs):
-        if Path(command).name.removesuffix(".exe") in commands:
+        if Path(os.fsdecode(command)).name.removesuffix(".exe") in commands:
             return None
         return original_which(command, *args, **kwargs)
 

@@ -386,7 +386,7 @@ def test_deepseek_usage_survives_final_text_and_is_emitted_once(profile, tmp_pat
     assert result.usage["total_tokens"] == 110
     usages = [e for e in events if e["type"] == "usage"]
     assert len(usages) == 1
-    assert usages[0]["cost_status"] == "estimated_deepseek_api"
+    assert usages[0]["cost_status"] == "estimated_api"
     run = LiveRun("usage-test", "hello", "conversation")
     for event in events:
         run.emit(event)
@@ -404,6 +404,34 @@ def test_failed_turn_keeps_completed_usage_and_error_without_raw_transcript(prof
     assert result.error_kind == "insufficient_balance"
     assert result.usage["total_tokens"] == 12
     assert '"type"' not in result.stdout
+
+
+RECOVERED_STREAM = [
+    {"type": "turn.started"},
+    {"type": "error", "message": "Reconnecting... 1/5 (stream disconnected before completion: stream closed before response.completed)"},
+    {"type": "item.completed", "item": {"type": "agent_message", "text": "LOCAL_RECOVERY_OK"}},
+    {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
+]
+
+
+@pytest.mark.parametrize("name", ["deepseek", "codex"])
+def test_reconnect_notice_followed_by_completed_turn_succeeds(profile, tmp_path, name):
+    result = jsonl_provider(tmp_path, RECOVERED_STREAM, name=name).run(
+        "hello", tmp_path, Intent.ANSWER, 3, model="deepseek-flash" if name == "deepseek" else None,
+    )
+    assert result.ok
+    assert result.error_kind is None
+    assert result.error_message is None
+    assert result.stdout == "LOCAL_RECOVERY_OK"
+    assert result.usage["total_tokens"] == 12
+
+
+def test_completed_turn_does_not_clear_error_when_process_fails(profile, tmp_path):
+    from joe.codex_results import codex_failure
+
+    output = "\n".join(json.dumps(event) for event in RECOVERED_STREAM)
+    assert codex_failure(output) is None
+    assert codex_failure(output, 1) is not None
 
 
 def test_timeout_preserves_prior_usage_without_retaining_jsonl(profile, tmp_path):
@@ -632,3 +660,49 @@ def test_explicit_review_failure_does_not_complete_or_replace_the_reviewer(profi
     assert not terminal["ok"]
     assert not [e for e in events if e["type"] == "workflow_update" and e.get("stage") == "review"
                 and e.get("status") == "complete"]
+
+
+def test_reviewer_balance_failure_after_recovered_executor_quota_is_not_retried(profile, tmp_path):
+    from joe.models import ProviderResult
+    from joe.orchestrator import OrchestrationError, Orchestrator
+    from joe.provider_health import recent_failure
+    from joe.web_runs import _quota_retry_allowed
+
+    def fixed(name, kind, text=""):
+        class Fixed:
+            def run(self, *args, **kwargs):
+                return ProviderResult(name, [name], text, "", 1 if kind else 0, 0.1,
+                                      error_kind=kind,
+                                      http_status=402 if kind == "insufficient_balance" else None)
+        return Fixed()
+
+    orchestrator = Orchestrator(tmp_path, providers={
+        "codex": fixed("codex", "quota"),
+        "claude": fixed("claude", None, "Implementation complete."),
+        "deepseek": fixed("deepseek", "insufficient_balance"),
+    })
+    config = orchestrator.memory.config()
+    config["fallbacks"]["codex"] = ["claude"]
+    (orchestrator.memory.root / "config.yaml").write_text(json.dumps(config))
+    route = orchestrator.router.route("Implement change", forced_agent="codex", forced_reviewer="deepseek")
+    events = []
+    with pytest.raises(OrchestrationError) as raised:
+        orchestrator.execute("Implement change", route, execution_mode="read-only", on_event=events.append)
+    ends = [(e["provider"], e["error"]) for e in events if e["type"] == "provider_end"]
+    assert ends == [("codex", "quota"), ("claude", None), ("deepseek", "insufficient_balance")]
+    assert ":quota" in str(raised.value)
+    assert raised.value.failures == (("deepseek", "insufficient_balance"),)
+    assert not _quota_retry_allowed(raised.value)
+    assert recent_failure("deepseek")[0] == "insufficient_balance"
+
+
+def test_quota_retry_requires_an_unresolved_subscription_quota():
+    from joe.orchestrator import OrchestrationError
+    from joe.web_runs import _quota_retry_allowed
+
+    assert _quota_retry_allowed(OrchestrationError("x", (("codex", "quota"), ("claude", "authentication"))))
+    assert not _quota_retry_allowed(OrchestrationError("x", (("codex", "quota"), ("deepseek", "insufficient_balance"))))
+    assert not _quota_retry_allowed(OrchestrationError("x", (("deepseek", "quota"),)))
+    assert not _quota_retry_allowed(OrchestrationError("All providers failed (codex:quota)", ()))
+    assert _quota_retry_allowed(OrchestrationError("All providers failed (codex:quota)"))
+    assert not _quota_retry_allowed(RuntimeError("codex:quota"))

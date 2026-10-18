@@ -542,7 +542,7 @@ class Provider:
             if self.name == "gemini":
                 record_gemini_usage(stdout)
             usage = parse_provider_usage(self.name, stdout, model)
-            failure = codex_failure(stdout) if uses_stdin else None
+            failure = codex_failure(stdout, process.returncode) if uses_stdin else None
             if failure is not None:
                 if self.name == "deepseek":
                     from .deepseek_errors import classify_failure

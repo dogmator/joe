@@ -122,7 +122,7 @@ def parse_provider_usage(provider: str, output: str, model: str | None = None) -
         cached = min(totals["cache_read_tokens"], totals["input_tokens"])
         cost = (cached * hit + (totals["input_tokens"] - cached) * miss
                 + totals["output_tokens"] * output_rate) / _MILLION
-        cost_status = "estimated_deepseek_api"
+        cost_status = "estimated_api"
     elif not codex_backend:
         cost, cost_status = _cost(totals, None, direct_cost)
     result = {

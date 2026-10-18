@@ -1130,6 +1130,11 @@ function applySettings(settings) {
     $("model").value = settings.model;
   }
   updateEfforts();
+  // Les options du relecteur excluent encore l'agent de la conversation
+  // précédente : sans reconstruction, un relecteur enregistré absent de cette
+  // liste retombait silencieusement sur « Automatique ».
+  $("reviewer").value = "";
+  updateReviewerMenu(state.providerCatalog || []);
   $("reviewer").value = settings.reviewer || "";
   $("mode").value = $("reviewer").value ? "review" : (settings.mode || "");
   $("effort").value = settings.effort || "";

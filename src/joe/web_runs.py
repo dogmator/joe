@@ -71,6 +71,23 @@ def _quota_backoff(defer_count: int, now: float | None = None) -> float:
     return timestamp + delay
 
 
+def _quota_retry_allowed(exc: Exception) -> bool:
+    """Only an unresolved subscription quota of the failed stage is retried.
+
+    Le message cite aussi les échecs déjà rattrapés par un repli : un quota
+    Codex résolu ne doit pas transformer un solde DeepSeek épuisé (402,
+    `retry_at=None`) en reprise automatique.
+    """
+    if not isinstance(exc, OrchestrationError):
+        return False
+    if exc.failures is None:
+        return ":quota" in str(exc)
+    return any(kind == "quota" for _, kind in exc.failures) and not any(
+        kind == "insufficient_balance" or get_provider_spec(name).manual_only
+        for name, kind in exc.failures
+    )
+
+
 @dataclass(frozen=True)
 class RunDecision:
     """Everything decided before a run starts, computed once and transported.
@@ -977,8 +994,7 @@ class RunManager:
             )
         except Exception as exc:
             if (
-                isinstance(exc, OrchestrationError)
-                and ":quota" in str(exc)
+                _quota_retry_allowed(exc)
                 and self._project_uses_quota_automation(run.conversation_id)
                 and not run.cancel_event.is_set()
             ):

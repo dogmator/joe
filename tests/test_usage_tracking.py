@@ -40,7 +40,7 @@ def test_deepseek_cost_uses_its_own_rates_and_does_not_charge_cached_input_twice
     assert result["reasoning_tokens"] == 300
     # Peak estimate: 600000 * 0.3/M + 400000 * 0.006/M + 1000 * 1.2/M.
     assert result["cost_usd"] == pytest.approx(0.1836)
-    assert result["cost_status"] == "estimated_deepseek_api"
+    assert result["cost_status"] == "estimated_api"
     assert result["cost_provider"] == "deepseek"
     assert result["cost_rate_basis"] == "peak"
 
@@ -77,7 +77,7 @@ def test_conversation_statistics_count_inclusive_usage_once(tmp_path):
         "attempts": [{"provider": "deepseek", "status": "complete", "usage": {
             "input_tokens": 100, "cache_read_tokens": 40, "output_tokens": 10,
             "reasoning_tokens": 3, "total_tokens": 110,
-            "cost_status": "estimated_deepseek_api", "cost_usd": 0.00003,
+            "cost_status": "estimated_api", "cost_usd": 0.00003,
         }}],
     })
     assert store.analytics()["runs"][0]["tokens"] == 110
