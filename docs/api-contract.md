@@ -253,3 +253,18 @@ The more detailed functional tests stay in `tests/test_web.py`.
 Mutations require the `maintainer` profile. `execution_mode` is limited to
 `read-only` and `workspace-write`: an autonomous plan cannot approve its own
 full access.
+
+
+### Usage presentation and DeepSeek funds
+
+`GET /api/usage` retains its authenticated viewer access. Usage entries may add
+`quota_display` (`cli_unsupported`, `interactive_only`, or `token_billing`),
+`installed`, and `setup_required` for presentation. An unsupported quota source
+must not be interpreted as a provider connection failure.
+
+DeepSeek's nested `balance` contains `available` (balance data retrieved),
+`amount`, `currency`, `balance_usd` (null for non-USD), `is_available` (the API's
+sufficient-funds flag), `error_kind`, and `http_status`. A failed read has null
+money values and `available: false`, without changing the provider entry's own
+`available` field. Account amounts never populate percentage quota windows.
+The existing usage cache applies; `?force=1` retains its maintainer requirement.

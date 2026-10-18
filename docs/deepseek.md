@@ -48,6 +48,31 @@ and reviewer selection, fallback, classification, arbitration, compaction, and
 the general `doctor --live` probe exclude manual-only providers. Explicit saved
 automation choices remain explicit choices and may spend API balance.
 
+## Account balance and usage cards
+
+The **AI usage & limits** panel reads the official `GET /user/balance` endpoint
+using Python's existing `urllib.request` client. No runtime dependency is added.
+The key is read from the same protected credentials file. Requests have a
+4-second timeout, bounded response size and disabled redirects; errors return
+fixed diagnostic codes without logging credentials or raw exceptions.
+
+The API's `total_balance` already includes granted and topped-up funds. Joe
+prefers USD when provided, otherwise displays CNY in its actual currency;
+it neither adds those components again nor converts currencies. Zero is a real
+balance. Missing, malformed or failed responses display **Unavailable**, never
+a fabricated zero. Balance data availability and the API's `is_available`
+(sufficient funds for model calls) are separate fields.
+
+Balance reads do not require Codex to be installed and do not run a model.
+They use the existing 60-second usage cache; the refresh button fetches again.
+The balance is a display value and does not alter routing, cooldowns, session
+quota windows or automatic resume policy. Account data is served through the
+existing authenticated `/api/usage` endpoint; the key stays on the server.
+
+Antigravity and Copilot have neutral **CLI limitation** and **Interactive only**
+badges. DeepSeek has **Pay per token** and its current account balance. Actual
+missing installation, setup errors or model failures retain their diagnostics.
+
 ## Errors, usage and verification
 
 DeepSeek health is separate from Codex health. Diagnostics preserve 401, 402,

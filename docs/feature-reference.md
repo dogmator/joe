@@ -350,10 +350,20 @@ unambiguous, so it does not spend model tokens merely to write a small
 
 ## 12. Quotas and provider health
 
-The quota panel represents only data the provider actually exposes. It keeps
+The **AI usage & limits** panel represents only data the provider actually exposes. It keeps
 unknown availability distinct from an exhausted quota and displays reset times
 when known. Provider-specific account plans and windows are shown without
 inventing a universal quota model.
+
+Antigravity uses a neutral **CLI limitation** badge because its CLI does not
+expose quotas. Copilot uses **Interactive only**, pointing to its interactive
+session. These are expected data limitations rather than agent failures.
+
+DeepSeek uses **Pay per token** and reads its account balance from the official
+API. Funds are shown in the returned USD or CNY currency; unknown funds are
+shown as unavailable, never zero. Reads use the existing 60-second cache and
+can be refreshed manually. The key remains on the server. Balance data does
+not change provider routing or the meaning of model health.
 
 DeepSeek reports `quota_unknown` with no session quota windows. It does not
 support automatic quota pauses or balance-to-percentage conversion. Its health
