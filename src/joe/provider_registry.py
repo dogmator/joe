@@ -18,6 +18,8 @@ from dataclasses import dataclass
 class ProviderSpec:
     name: str
     label: str
+    cli_backend: str = ""
+    manual_only: bool = False
 
     streams_json: bool = False
     """La CLI émet des événements JSON sur stdout plutôt que du texte brut.
@@ -219,6 +221,7 @@ PROVIDERS = (
         homepage="https://cursor.com/docs/cli/installation",
         sign_in="agent login",
     ),
+
 )
 
 _BY_NAME = {provider.name: provider for provider in PROVIDERS}
@@ -266,6 +269,10 @@ def provider_executables(name: str) -> tuple[str, ...]:
     return spec.executables or (spec.name,)
 
 
+def provider_backend(name: str) -> str:
+    return get_provider_spec(name).cli_backend or name
+
+
 def install_hint(name: str, *, windows: bool = False) -> dict[str, str]:
     """Tout ce qu'il faut pour installer et connecter une CLI absente."""
     spec = get_provider_spec(name)
@@ -311,7 +318,10 @@ def arbitration_order(
     consensus. Ils passent simplement en fin de liste.
     """
     allowed = eligible if eligible is not None else get_provider_names()
-    candidates = [name for name in allowed if name in _BY_NAME]
+    candidates = [
+        name for name in allowed if name in _BY_NAME
+        and (not get_provider_spec(name).manual_only or name in proposers)
+    ]
 
     def rank(name: str) -> tuple[int, int, str]:
         return (
@@ -325,7 +335,10 @@ def arbitration_order(
 
 def counterpart(primary: str, eligible: tuple[str, ...] | None = None) -> str | None:
     """Return the preferred reviewer for `primary`, honouring the registry."""
-    allowed = eligible if eligible is not None else get_provider_names()
+    allowed = tuple(
+        name for name in (eligible if eligible is not None else get_provider_names())
+        if not get_provider_spec(name).manual_only
+    )
     for peer in get_provider_spec(primary).reviewer_peers:
         if peer != primary and peer in allowed:
             return peer

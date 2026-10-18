@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from .capabilities import provider_defaults
-from .provider_registry import counterpart
+from .provider_registry import counterpart, get_provider_spec
 from .usage_tracking import parse_provider_usage
 from .memory import ProjectMemory
 from .models import Intent, Mode, ProviderResult, Route
@@ -309,6 +309,8 @@ class Orchestrator:
             candidates.extend(config["fallbacks"].get(provider_name, []))
         seen: set[str] = set()
         for name in candidates:
+            if name != provider_name and get_provider_spec(name).manual_only:
+                continue
             if name in seen or name not in self.providers or name in (exclude or set()):
                 continue
             failure = recent_failure(name) if respect_cooldown else None
@@ -318,6 +320,7 @@ class Orchestrator:
                 if candidate not in seen
                 and candidate != name
                 and candidate in self.providers
+                and not get_provider_spec(candidate).manual_only
                 and candidate not in (exclude or set())
                 and recent_failure(candidate) is None
             ]
@@ -422,6 +425,7 @@ class Orchestrator:
                         for candidate in candidates
                         if candidate not in seen
                         and candidate in self.providers
+                        and not get_provider_spec(candidate).manual_only
                         and candidate not in (exclude or set())
                     ),
                     None,
