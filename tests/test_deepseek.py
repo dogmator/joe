@@ -276,3 +276,51 @@ def test_web_decision_honours_flash_high_defaults(profile, tmp_path, monkeypatch
     decision = manager.decide("Fix the function", conversation["id"], agent="deepseek")
     assert decision.model == "deepseek-flash"
     assert decision.effort == "high"
+
+
+def test_concurrent_codex_and_deepseek_keep_their_environments(profile, tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    ordinary_home = tmp_path / "ordinary-codex"
+    monkeypatch.setenv("CODEX_HOME", str(ordinary_home))
+    monkeypatch.setenv("OPENAI_API_KEY", "ordinary-openai-key")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    script = tmp_path / "parallel-fixture.py"
+    script.write_text(
+        "import json,os,sys,time\nfrom pathlib import Path\n"
+        "name=sys.argv[1]\n"
+        f"base=Path({str(tmp_path)!r})\n"
+        "(base/(name+'.ready')).touch()\n"
+        "deadline=time.monotonic()+3\n"
+        "while not all((base/(x+'.ready')).exists() for x in ('codex','deepseek')):\n"
+        "    assert time.monotonic()<deadline, 'processes did not overlap'\n"
+        "    time.sleep(.01)\n"
+        "if name=='deepseek':\n"
+        f"    assert os.environ['CODEX_HOME']=={str(profile)!r}\n"
+        "    assert os.environ['DEEPSEEK_API_KEY']=='test-deepseek-key'\n"
+        "    assert 'OPENAI_API_KEY' not in os.environ\n"
+        "else:\n"
+        f"    assert os.environ['CODEX_HOME']=={str(ordinary_home)!r}\n"
+        "    assert os.environ['OPENAI_API_KEY']=='ordinary-openai-key'\n"
+        "    assert 'DEEPSEEK_API_KEY' not in os.environ\n"
+        "assert sys.stdin.read()=='parallel prompt'\n"
+        "print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'ISOLATION_OK_'+name}}))\n",
+        encoding="utf-8",
+    )
+
+    class ProcessFixture(Provider):
+        def command(self, *args, **kwargs):
+            return [sys.executable, str(script), self.name]
+
+    before = dict(os.environ)
+
+    def run(name):
+        return ProcessFixture(name, sys.executable).run(
+            "parallel prompt", tmp_path, Intent.ANSWER, 5
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, ("codex", "deepseek")))
+    assert all(result.ok for result in results), [r.stderr for r in results]
+    assert [r.stdout for r in results] == ["ISOLATION_OK_codex", "ISOLATION_OK_deepseek"]
+    assert dict(os.environ) == before

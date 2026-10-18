@@ -254,15 +254,17 @@ class Provider:
         command.extend(["--config", "project_doc_max_bytes=0"])
         if effort:
             command.extend(["--config", f'model_reasoning_effort="{effort}"'])
+        if self.remote_access and sandbox == "workspace-write":
+            # exec's --config list replaces the global list in Codex. Keep
+            # networking here so connection and effort overrides survive.
+            command.extend(
+                ["--config", "sandbox_workspace_write.network_access=true"]
+            )
         command.extend([
             "exec", "--json",
             "--ephemeral", "--skip-git-repo-check", "--color", "never",
             "--sandbox", sandbox,
         ])
-        if self.remote_access and sandbox == "workspace-write":
-            command.extend(
-                ["--config", "sandbox_workspace_write.network_access=true"]
-            )
         command.extend(self._roots("--add-dir"))
         if model:
             command.extend(["--model", model])

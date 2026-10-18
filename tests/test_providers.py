@@ -405,6 +405,18 @@ def test_additional_project_roots_are_forwarded_to_each_cli():
         assert command[command.index(flag) + 1] == str(extra[0])
 
 
+def test_codex_network_setting_preserves_global_connection_and_effort_overrides():
+    # Codex exec's own --config list replaces the global list rather than
+    # merging it. Keep networking alongside connection/model overrides.
+    for name in ("codex", "deepseek"):
+        command = Provider(name, "codex", remote_access=True).command(
+            "hello", Path("/tmp/project"), Intent.MODIFY,
+            effort="low", execution_mode="workspace-write",
+        )
+        assert command.index("sandbox_workspace_write.network_access=true") < command.index("exec"), name
+        assert '--config' not in command[command.index("exec") + 1:], name
+
+
 def test_codex_remote_access_enables_native_search_and_write_network():
     command = Provider("codex", "codex", remote_access=True).command(
         "p", Path("/tmp/project"), Intent.MODIFY
