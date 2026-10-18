@@ -12,8 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .capabilities import select_model_tier
-from .provider_registry import get_provider_names
+from .capabilities import provider_defaults, select_model_tier
+from .provider_registry import get_provider_names, get_provider_spec
 from .approvals import ApprovalStore
 from .automations import AutomationStore, START_MODES
 from .autonomous import AutonomousStore, TERMINAL_STATUSES, build_autonomous_skill
@@ -703,7 +703,9 @@ class RunManager:
             if plan_stage == "propose"
             else _resolve_execution_mode(execution_mode, ai_access, route)
         )
-        if classification is not None:
+        if get_provider_spec(route.primary).manual_only:
+            model, effort = provider_defaults(route.primary, model, effort)
+        elif classification is not None:
             effort = effort or classification.effort
             model = model or select_model_tier(
                 route.primary,
@@ -3136,7 +3138,8 @@ def _compaction_provider(configured: str, installed: Any) -> str:
         configured = "antigravity"
     if configured and configured in installed:
         return configured
-    noms = [name for name in get_provider_names() if name in installed]
+    noms = [name for name in get_provider_names() if name in installed
+            and not get_provider_spec(name).manual_only]
     return (noms or [""])[0]
 
 

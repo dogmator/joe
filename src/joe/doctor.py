@@ -106,6 +106,7 @@ def doctor_report(
             "label": get_provider_spec(name).label,
             "installed": bool(executable) and not runtime_issue,
             "enabled": name not in refused,
+            "manual_only": get_provider_spec(name).manual_only,
             "executable": executable or doubtful,
             "unconfirmed": doubtful,
             "version": versions.get(name),
@@ -137,7 +138,7 @@ def doctor_report(
                 ),
             },
         }
-        if live and executable and not runtime_issue:
+        if live and executable and not runtime_issue and not item["manual_only"]:
             result = provider.run(
                 "Réponds uniquement : OK",
                 root,
@@ -190,6 +191,8 @@ def format_doctor(report: dict[str, Any]) -> str:
             state += f" · retired for consumer accounts on {retired['since']}"
         disabled = "" if item.get("enabled", True) else " · turned off in Joe"
         line = f"- {label}: {state}{version}{disabled}"
+        if item.get("manual_only"):
+            line += " · manual selection only (live probe skipped)"
         live = item.get("live")
         if live:
             line += (

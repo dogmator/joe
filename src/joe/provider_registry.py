@@ -221,7 +221,15 @@ PROVIDERS = (
         homepage="https://cursor.com/docs/cli/installation",
         sign_in="agent login",
     ),
-
+    ProviderSpec(
+        "deepseek", "DeepSeek", cli_backend="codex", manual_only=True,
+        streams_json=True, executables=("codex",), identity_marker="codex",
+        reviewer_peers=("codex", "claude"), minimum_version="0.163.0",
+        install_posix="npm install -g @openai/codex", requires_node="22",
+        install_windows="npm install -g @openai/codex",
+        homepage="https://api-docs.deepseek.com/quick_start/agent_integrations/codex/",
+        sign_in="Configure Joe's isolated DeepSeek profile and credentials.json",
+    ),
 )
 
 _BY_NAME = {provider.name: provider for provider in PROVIDERS}

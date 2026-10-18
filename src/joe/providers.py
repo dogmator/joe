@@ -20,6 +20,7 @@ from .provider_registry import (
     get_provider_spec,
     get_provider_specs,
     provider_executables,
+    provider_backend,
 )
 from .usage import record_gemini_usage
 
@@ -43,7 +44,7 @@ RESTRICTED_MODES = {"dontAsk"}
 # contraint pas, et l'interface doit le dire au lieu de laisser croire à une
 # garantie globale. Voir tests/test_providers.py::
 # test_network_control_declaration_matches_commands.
-NETWORK_CONTROLLED_PROVIDERS = ("codex",)
+NETWORK_CONTROLLED_PROVIDERS = ("codex", "deepseek")
 
 
 def provider_runtime_issue(name: str, executable: str) -> str | None:
@@ -53,6 +54,10 @@ def provider_runtime_issue(name: str, executable: str) -> str | None:
     npm package supplies its own layout, so this check intentionally applies
     only to Joe's managed native installation.
     """
+    if name == "deepseek":
+        from .deepseek_profile import setup_error
+
+        return setup_error() or provider_runtime_issue("codex", executable)
     if name != "codex":
         return None
     path = Path(executable)
@@ -265,6 +270,32 @@ class Provider:
         # The same transport is supported on macOS and Linux.
         return [*command, "-C", str(cwd), "-"]
 
+    def _argv_deepseek(
+        self, access: str, prompt: str, cwd: Path,
+        model: str | None, effort: str | None,
+    ) -> list[str]:
+        from .deepseek_profile import EFFORTS, MODELS, profile_directory
+
+        model, effort = model or MODELS[0], effort or "high"
+        if model not in MODELS or effort not in EFFORTS:
+            raise ValueError("Unsupported DeepSeek model or effort")
+        command = self._argv_codex(access, prompt, cwd, model, effort)
+        overrides = {
+            "model_provider": "deepseek",
+            "model_catalog_json": str(profile_directory() / "models.json"),
+            "model_providers.deepseek.name": "DeepSeek",
+            "model_providers.deepseek.base_url": "https://api.deepseek.com",
+            "model_providers.deepseek.env_key": "DEEPSEEK_API_KEY",
+            "model_providers.deepseek.wire_api": "responses",
+            "model_providers.deepseek.requires_openai_auth": False,
+            "model_providers.deepseek.supports_websockets": False,
+        }
+        position = command.index("exec")
+        arguments = []
+        for key, value in overrides.items():
+            arguments.extend(["--config", f"{key}={json.dumps(value)}"])
+        return [*command[:position], *arguments, *command[position:]]
+
     def _argv_claude(
         self,
         access: str,
@@ -465,6 +496,17 @@ class Provider:
         )
         command[0] = executable
         env = os.environ.copy()
+        if self.name == "deepseek":
+            from .deepseek_profile import process_environment
+
+            try:
+                env = process_environment(env)
+            except (OSError, ValueError):
+                return ProviderResult(
+                    self.name, command, "", "DeepSeek API key requires setup", 127, 0,
+                    error_kind="authentication",
+                )
+        uses_stdin = provider_backend(self.name) == "codex"
         secret_values = _secret_values(env)
         start = time.monotonic()
         try:
@@ -476,13 +518,13 @@ class Provider:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                stdin=(subprocess.PIPE if self.name == "codex" else None),
+                stdin=(subprocess.PIPE if uses_stdin else None),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=1,
                 **group_options,
             )
-            if self.name == "codex" and process.stdin is not None:
+            if uses_stdin and process.stdin is not None:
                 try:
                     process.stdin.write(prompt)
                     process.stdin.close()
@@ -506,14 +548,16 @@ class Provider:
                 process.returncode,
                 self.name,
             )
+            redacted_command = [_redact_values(part, secret_values) for part in command]
             return ProviderResult(
-                self.name, command, stdout, stderr,
+                self.name, redacted_command, stdout, stderr,
                 process.returncode, duration, error_kind=kind,
             )
         except TimeoutError as exc:
+            redacted_command = [_redact_values(part, secret_values) for part in command]
             return ProviderResult(
                 self.name,
-                command,
+                redacted_command,
                 getattr(exc, "stdout", ""),
                 getattr(exc, "stderr", ""),
                 124,
@@ -522,9 +566,10 @@ class Provider:
                 error_kind="timeout",
             )
         except ProviderCancelled as exc:
+            redacted_command = [_redact_values(part, secret_values) for part in command]
             return ProviderResult(
                 self.name,
-                command,
+                redacted_command,
                 getattr(exc, "stdout", ""),
                 getattr(exc, "stderr", ""),
                 130,
@@ -569,6 +614,7 @@ def classify_error(
 # Un fournisseur déclaré au registre sans constructeur d'argv — ou l'inverse —
 # échoue ici, à l'import, au lieu de lever au premier run.
 _ARGV_BUILDERS = {
+    "deepseek": Provider._argv_deepseek,
     "codex": Provider._argv_codex,
     "claude": Provider._argv_claude,
     "copilot": Provider._argv_copilot,
@@ -625,8 +671,12 @@ def active_providers(
         name: provider
         for name, provider in declared.items()
         if name not in refused and resolve_executable(name)
+        and (name != "deepseek" or not provider_runtime_issue(name, resolve_executable(name)))
     }
-    return usable or declared
+    return usable or {
+        name: provider for name, provider in declared.items()
+        if not get_provider_spec(name).manual_only
+    }
 
 
 def _text(value: str | bytes | None) -> str:
@@ -1071,11 +1121,13 @@ def _redact_values(text: str, values: tuple[str, ...]) -> str:
 # et un extracteur de réponse. Sans cette validation, il se dégradait
 # silencieusement : aucun événement affiché, réponse brute renvoyée.
 _ACTIVITY_PARSERS = {
+    "deepseek": _activity_codex,
     "codex": _activity_codex,
     "claude": _activity_claude,
     "antigravity": _activity_antigravity,
 }
 _FINAL_EXTRACTORS = {
+    "deepseek": _final_codex,
     "codex": _final_codex,
     "claude": _final_claude,
     "antigravity": _final_antigravity,
