@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote, quote_plus
 
 from .models import Intent, ProviderResult
 from .mcp import allowed_tool_patterns
@@ -513,6 +514,7 @@ class Provider:
         uses_stdin = provider_backend(self.name) == "codex"
         secret_values = _secret_values(env)
         start = time.monotonic()
+        process: subprocess.Popen[str] | None = None
         try:
             group_options = _process_group_options()
             process = subprocess.Popen(
@@ -588,6 +590,16 @@ class Provider:
                 time.monotonic() - start,
                 error_kind="cancelled",
                 usage=parse_provider_usage(self.name, partial, model),
+            )
+        except (OSError, ValueError):
+            if process is not None:
+                _stop_process(process, force=True)
+            # An OS/encoding exception can embed argv or environment values.
+            # Return a fixed diagnostic rather than propagating its message.
+            return ProviderResult(
+                self.name, [_redact_values(part, secret_values) for part in command],
+                "", "Provider process could not be started or read", 127,
+                time.monotonic() - start, error_kind="unavailable",
             )
 
 
@@ -1119,9 +1131,15 @@ def _secret_values(env: dict[str, str]) -> tuple[str, ...]:
     values = {
         value
         for name, value in env.items()
-        if value and len(value) >= 8 and any(marker in name.upper() for marker in markers)
+        if value and (len(value) >= 8 or name == "DEEPSEEK_API_KEY")
+        and any(marker in name.upper() for marker in markers)
     }
-    return tuple(sorted(values, key=len, reverse=True))
+    variants = {
+        variant
+        for value in values
+        for variant in (value, json.dumps(value, ensure_ascii=False)[1:-1], quote(value, safe=""), quote_plus(value))
+    }
+    return tuple(sorted(variants, key=len, reverse=True))
 
 
 def _redact_values(text: str, values: tuple[str, ...]) -> str:

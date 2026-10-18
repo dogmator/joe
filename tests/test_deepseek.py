@@ -443,3 +443,68 @@ def test_final_answer_json_cannot_forge_usage(profile, tmp_path):
     assert result.stdout == text
     assert result.usage is None
     assert not any(event["type"] == "usage" for event in events)
+
+
+def test_spawn_failure_never_exposes_profile_key_in_an_exception(profile, tmp_path, monkeypatch):
+    def rejected_spawn(*args, **kwargs):
+        raise OSError("fixture rejected env token: " + kwargs["env"]["DEEPSEEK_API_KEY"])
+
+    monkeypatch.setattr("joe.providers.subprocess.Popen", rejected_spawn)
+    result = Provider("deepseek", sys.executable).run("hello", tmp_path, Intent.ANSWER, 3)
+    assert result.error_kind == "unavailable"
+    assert "test-deepseek-key" not in result.stderr + json.dumps(result.metadata())
+
+
+def test_json_escaped_key_is_redacted_from_stream_events_and_metadata(profile, tmp_path):
+    secret = 'test-token-with-"quote\\slash'
+    (profile.parent / "credentials.json").write_text(json.dumps({"api_key": secret}))
+    provider = jsonl_provider(tmp_path, [
+        {"type": "item.started", "item": {"type": "command_execution", "command": "echo " + secret}},
+        {"type": "turn.failed", "error": {"message": "unexpected status 401: " + secret}},
+    ], 1)
+    events = []
+    result = provider.run("hello", tmp_path, Intent.ANSWER, 3,
+                          on_stream=lambda stream, text: events.append((stream, text)))
+    observed = [result.stdout, result.stderr, result.error_message or "", json.dumps(result.metadata())]
+    observed.extend(json.loads(value).get("detail", "") for stream, value in events if stream == "activity")
+    assert not any(secret in value for value in observed)
+    assert "[REDACTED]" in result.error_message
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX regular-file and mode checks")
+@pytest.mark.parametrize("kind", ["mode-0640", "mode-0644", "mode-0660", "symlink", "fifo"])
+def test_unsafe_credential_file_is_rejected_by_doctor_before_spawn(profile, tmp_path, monkeypatch, kind):
+    from joe.doctor import doctor_report
+
+    credential = profile.parent / "credentials.json"
+    if kind.startswith("mode-"):
+        credential.chmod(int(kind.removeprefix("mode-"), 8))
+    elif kind == "symlink":
+        target = profile.parent / "other.json"
+        credential.rename(target)
+        credential.symlink_to(target)
+    else:
+        credential.unlink()
+        os.mkfifo(credential, 0o600)
+        import subprocess
+
+        completed = subprocess.run(
+            [sys.executable, "-c", "from joe.deepseek_profile import setup_error; assert setup_error()"],
+            capture_output=True, text=True, timeout=3,
+        )
+        assert completed.returncode == 0, completed.stderr
+        return
+
+    def forbidden_spawn(*args, **kwargs):
+        raise AssertionError("unsafe credentials must be rejected before starting a CLI")
+
+    monkeypatch.setattr("joe.doctor.provider_audit", lambda: [])
+    monkeypatch.setattr("joe.doctor.usage_status", lambda **kwargs: [])
+    monkeypatch.setattr("joe.doctor.node_runtime", lambda: {"present": False})
+    monkeypatch.setattr("joe.doctor.resolve_executable", lambda *args, **kwargs: sys.executable)
+    monkeypatch.setattr("joe.providers.subprocess.Popen", forbidden_spawn)
+    report = doctor_report(tmp_path, providers={"deepseek": Provider("deepseek", sys.executable)})
+    assert not report["providers"][0]["installed"]
+    assert report["providers"][0]["runtime_issue"]
+    result = Provider("deepseek", sys.executable).run("hello", tmp_path, Intent.ANSWER, 3)
+    assert not result.ok
