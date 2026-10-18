@@ -34,6 +34,7 @@ companion use the same local server and the same persisted data.
 Joe detects and drives the following local CLIs:
 
 - OpenAI Codex;
+- DeepSeek API through an isolated Codex CLI profile (manual selection only);
 - Claude Code;
 - Antigravity CLI;
 - GitHub Copilot CLI;
@@ -42,10 +43,17 @@ Joe detects and drives the following local CLIs:
 Only installed and enabled providers are eligible. A provider can be disabled
 from **Options → Preferences → AI CLIs** without uninstalling it.
 
-Joe uses each provider's existing authentication and configuration. It never
-asks for or stores provider passwords or API keys. Native provider tools,
-commands, model catalogues, MCP configuration, retention policies, billing,
-and quotas remain the provider's responsibility.
+Ordinary CLI providers keep their existing authentication and configuration.
+The optional DeepSeek profile reads an API key from Joe's protected local
+`credentials.json` and supplies it only to the DeepSeek child process. The
+ordinary Codex and Claude accounts are preserved. Native tools, retention,
+billing, and quotas remain the provider's responsibility. See the
+[DeepSeek profile](deepseek.md) for the file contract and isolation rules.
+
+DeepSeek is eligible only after an explicit selection as executor, REVIEW
+reviewer, or in a saved automation setting. Automatic routing, fallbacks,
+classification, compaction, arbitration, and general live diagnostics do not
+select it. The default is DeepSeek Flash with `high` reasoning effort.
 
 ### Model and effort control
 
@@ -54,6 +62,14 @@ automatic selection or override them for the next request. Joe only displays
 models it can identify safely from the provider catalogue or from its maintained
 compatibility data. If a CLI exposes no reliable catalogue, `auto` delegates
 the choice to that CLI.
+
+The Web **Reviewer** selector explicitly assigns the second provider and
+switches the workflow to REVIEW. Leaving it on Automatic preserves the usual
+reviewer selection. Executor and reviewer must be different logical providers;
+Codex and DeepSeek are distinct even though they share a CLI engine. The model
+and effort controls configure the executor; the reviewer resolves its own
+provider defaults and review tier. Changing to FAST or CONSENSUS clears the
+explicit reviewer. The selection is saved with the conversation and pending run.
 
 The activity panel records the provider, resolved model, and effort for every
 real provider call, including fallbacks and individual workflow stages.
@@ -339,6 +355,15 @@ unknown availability distinct from an exhausted quota and displays reset times
 when known. Provider-specific account plans and windows are shown without
 inventing a universal quota model.
 
+DeepSeek reports `quota_unknown` with no session quota windows. It does not
+support automatic quota pauses or balance-to-percentage conversion. Its health
+is independent of ordinary Codex: 401 identifies authentication failure, 402
+insufficient balance, 429 rate limiting, and 503 unavailability. A 402 never
+invents a recovery time; 429 uses a retry delay only when actually reported.
+Authentication, balance and rate-limit failures without a retry time require
+manual action rather than an automatic paid retry. Token costs are labelled
+**DeepSeek API estimates**, using dated reference rates rather than a bill.
+
 Routing uses:
 
 - installation and authentication state;
@@ -350,8 +375,8 @@ Routing uses:
 
 The refresh action updates supported providers. `joe doctor` checks local
 installation and storage without spending quota. `joe doctor --live` sends a
-short real prompt to every installed provider and therefore consumes a small
-amount of quota.
+short real prompt to each eligible installed provider and therefore consumes a
+small amount of quota. Manual-only DeepSeek is excluded from this general probe.
 
 ## 13. Scheduled plans and Autonomous campaigns
 
