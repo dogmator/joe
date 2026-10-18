@@ -3,6 +3,9 @@ import stat
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.error import URLError
+from urllib.parse import urlsplit
+from urllib.request import OpenerDirector, Request
 
 import pytest
 
@@ -35,6 +38,7 @@ def offline_provider_clis(tmp_path_factory):
     commands = {name for spec in get_provider_specs()
                 for name in (spec.name, *spec.executables)}
     original_which, original_popen = shutil.which, subprocess.Popen
+    original_open = OpenerDirector.open
     fixture_root = tmp_path_factory.getbasetemp().resolve()
 
     def fixture_which(command, *args, **kwargs):
@@ -49,9 +53,16 @@ def offline_provider_clis(tmp_path_factory):
             raise FileNotFoundError("Authenticated provider CLIs are disabled in the default test suite")
         return original_popen(args, *positional, **kwargs)
 
+    def fixture_open(self, fullurl, *args, **kwargs):
+        url = fullurl.full_url if isinstance(fullurl, Request) else fullurl
+        if urlsplit(url).hostname not in {"127.0.0.1", "::1", "localhost"}:
+            raise URLError("External HTTP is disabled in the default test suite")
+        return original_open(self, fullurl, *args, **kwargs)
+
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(shutil, "which", fixture_which)
         patch.setattr(subprocess, "Popen", fixture_popen)
+        patch.setattr(OpenerDirector, "open", fixture_open)
         yield
 
 
@@ -66,6 +77,7 @@ def warm_provider_catalogue(offline_provider_clis):
 def isolated_joe_data_home(tmp_path, monkeypatch):
     clear_cooldowns()
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "joe-test-data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "joe-test-config"))
     monkeypatch.setenv("JOE_DISABLE_LLM_ROUTER", "1")
     # Unit tests exercise scheduling deterministically. A daemon scheduler
     # surviving the test that created it must never launch a real provider.

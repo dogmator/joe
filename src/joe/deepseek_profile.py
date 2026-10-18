@@ -5,6 +5,12 @@ from __future__ import annotations
 import json
 import os
 import stat
+import math
+from decimal import Decimal, InvalidOperation
+from http.client import HTTPException
+from typing import Any, TypedDict
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from pathlib import Path
 
 MODELS = ("deepseek-flash", "deepseek-v4-pro")
@@ -100,3 +106,83 @@ def process_environment(parent: dict[str, str]) -> dict[str, str]:
     for name in ("OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"):
         environment.pop(name, None)
     return environment
+
+
+class DeepSeekBalance(TypedDict):
+    balance_usd: float | None
+    amount: float | None
+    currency: str | None
+    available: bool
+    is_available: bool | None
+    error_kind: str | None
+    http_status: int | None
+
+
+_BALANCE_URL = "https://api.deepseek.com/user/balance"
+
+
+class _NoBalanceRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req: Request, fp: Any, code: int, msg: str,
+                         headers: Any, newurl: str) -> None:
+        # Never forward the credential to a redirected host or an HTTP URL.
+        return None
+
+
+def fetch_deepseek_balance() -> DeepSeekBalance:
+    """Read account funds without running a model; failure means unknown, not zero.
+
+    ``available`` describes balance data, while ``is_available`` is the API's
+    separate indication that funds are sufficient for model calls. Non-USD
+    balances retain their actual currency and never populate ``balance_usd``.
+    """
+    result: DeepSeekBalance = {
+        "balance_usd": None, "amount": None, "currency": None,
+        "available": False, "is_available": None,
+        "error_kind": None, "http_status": None,
+    }
+    try:
+        key = _api_key()
+    except (OSError, ValueError):
+        result["error_kind"] = "credentials"
+        return result
+    request = Request(_BALANCE_URL, headers={
+        "Authorization": f"Bearer {key}", "Accept": "application/json",
+    }, method="GET")
+    try:
+        with build_opener(_NoBalanceRedirect()).open(request, timeout=4) as response:
+            raw = response.read(65_537)
+        if len(raw) > 65_536:
+            raise ValueError("oversized balance response")
+        data = json.loads(raw)
+        if not isinstance(data, dict) or not isinstance(data.get("is_available"), bool):
+            raise ValueError("invalid balance response")
+        balances = data.get("balance_infos")
+        if not isinstance(balances, list):
+            raise ValueError("invalid balance entries")
+        supported = [entry for entry in balances if isinstance(entry, dict)
+                     and entry.get("currency") in ("USD", "CNY")]
+        selected = next((entry for entry in supported if entry["currency"] == "USD"),
+                        supported[0] if supported else None)
+        if selected is None or not isinstance(selected.get("total_balance"), str):
+            raise ValueError("no supported balance")
+        value = Decimal(selected["total_balance"])
+        amount = float(value)
+        if not value.is_finite() or not math.isfinite(amount):
+            raise ValueError("non-finite balance")
+    except HTTPError as exc:
+        result["error_kind"] = "authentication" if exc.code == 401 else "http_error"
+        result["http_status"] = exc.code
+        exc.close()
+        return result
+    except (URLError, OSError, HTTPException):
+        result["error_kind"] = "network"
+        return result
+    except (ValueError, InvalidOperation, OverflowError):
+        result["error_kind"] = "invalid_response"
+        return result
+    result.update({
+        "balance_usd": amount if selected["currency"] == "USD" else None,
+        "amount": amount, "currency": selected["currency"], "available": True,
+        "is_available": data["is_available"],
+    })
+    return result

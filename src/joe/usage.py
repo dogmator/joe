@@ -90,7 +90,7 @@ def cached_usage_status() -> list[dict[str, Any]]:
 
 def _deepseek_status() -> dict[str, Any]:
     # API balance is not a Codex subscription window. Never probe a paid model.
-    from .deepseek_profile import setup_error
+    from .deepseek_profile import fetch_deepseek_balance, setup_error
     from .providers import resolve_executable
 
     issue = setup_error()
@@ -99,6 +99,7 @@ def _deepseek_status() -> dict[str, Any]:
         "provider": "deepseek", "available": installed and issue is None,
         "availability_state": "quota_unknown" if installed and issue is None else "unavailable",
         "plan": "DeepSeek API", "windows": [],
+        "balance": fetch_deepseek_balance() if installed and issue is None else None,
         "message": issue or ("DeepSeek API: solde et reprise inconnus, facturation par token"
                              if installed else "Codex CLI non installée"),
     }
