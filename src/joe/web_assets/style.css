@@ -1591,7 +1591,12 @@ h1 { max-width: 680px; font: 500 clamp(25px, 2.5vw, 36px)/1.15 Georgia, serif; }
   .history-panel.mobile-open { overflow: hidden; }
   .activity-panel.mobile-open { right: 0; left: auto; }
   .activity-tools { padding-right: 112px; }
-  .usage-panel { top: calc(100% + 8px); right: 0; left: auto; width: min(330px, calc(100vw - 24px)); }
+  .activity-panel.mobile-open .usage-panel {
+    position: fixed;
+    top: 58px; right: 12px; left: auto;
+    width: min(330px, calc(100vw - 24px));
+    max-height: calc(100dvh - 82px);
+  }
   .project-dialog form { padding: 18px; }
 }
 
