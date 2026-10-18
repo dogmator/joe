@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .provider_registry import provider_backend
+
 _MILLION = 1_000_000
 # API reference rates are deliberately labelled as estimates. They must not be
 # presented as the user's subscription bill.
@@ -67,7 +69,7 @@ def parse_provider_usage(provider: str, output: str, model: str | None = None) -
     models: set[str] = set()
     direct_cost: float | None = None
     found = False
-    codex_backend = provider in {"codex", "deepseek"}
+    codex_backend = provider_backend(provider) == "codex"
     completed_turn = False
     for line in output.splitlines():
         text = line.strip()

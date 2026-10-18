@@ -54,3 +54,11 @@ class ProviderResult:
         data.pop("stdout")
         data.pop("stderr")
         return data
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    error_message: str
+    http_status: int | None = None
+    retry_after_seconds: float | None = None
+    error_kind: str | None = None

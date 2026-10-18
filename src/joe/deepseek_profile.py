@@ -11,6 +11,31 @@ MODELS = ("deepseek-flash", "deepseek-v4-pro")
 EFFORTS = ("low", "high", "max")
 
 
+def model_defaults(model: str | None, effort: str | None) -> tuple[str, str]:
+    selected_model, selected_effort = model or MODELS[0], effort or "high"
+    if selected_model not in MODELS or selected_effort not in EFFORTS:
+        raise ValueError("Unsupported DeepSeek model or effort")
+    return selected_model, selected_effort
+
+
+def apply_codex_profile(command: list[str]) -> list[str]:
+    """Add profile settings to the existing Codex command, without rebuilding it."""
+    overrides: dict[str, str | bool] = {
+        "model_provider": "deepseek",
+        "model_catalog_json": str(profile_directory() / "models.json"),
+        "model_providers.deepseek.name": "DeepSeek",
+        "model_providers.deepseek.base_url": "https://api.deepseek.com",
+        "model_providers.deepseek.env_key": "DEEPSEEK_API_KEY",
+        "model_providers.deepseek.wire_api": "responses",
+        "model_providers.deepseek.requires_openai_auth": False,
+        "model_providers.deepseek.supports_websockets": False,
+    }
+    arguments = [argument for key, value in overrides.items()
+                 for argument in ("--config", f"{key}={json.dumps(value)}")]
+    position = command.index("exec")
+    return [*command[:position], *arguments, *command[position:]]
+
+
 def profile_directory() -> Path:
     config = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
     return config / "joe" / "deepseek" / "codex"

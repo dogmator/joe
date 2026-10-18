@@ -12,6 +12,7 @@ premier run.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class ProviderSpec:
     label: str
     cli_backend: str = ""
     manual_only: bool = False
+    quota_kind: Literal["windows", "balance"] = "windows"
 
     streams_json: bool = False
     """La CLI émet des événements JSON sur stdout plutôt que du texte brut.
@@ -222,7 +224,7 @@ PROVIDERS = (
         sign_in="agent login",
     ),
     ProviderSpec(
-        "deepseek", "DeepSeek", cli_backend="codex", manual_only=True,
+        "deepseek", "DeepSeek", cli_backend="codex", manual_only=True, quota_kind="balance",
         streams_json=True, executables=("codex",), identity_marker="codex",
         reviewer_peers=("codex", "claude"), minimum_version="0.163.0",
         install_posix="npm install -g @openai/codex", requires_node="22",

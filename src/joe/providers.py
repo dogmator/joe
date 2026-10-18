@@ -279,27 +279,10 @@ class Provider:
         self, access: str, prompt: str, cwd: Path,
         model: str | None, effort: str | None,
     ) -> list[str]:
-        from .deepseek_profile import EFFORTS, MODELS, profile_directory
+        from .deepseek_profile import apply_codex_profile, model_defaults
 
-        model, effort = model or MODELS[0], effort or "high"
-        if model not in MODELS or effort not in EFFORTS:
-            raise ValueError("Unsupported DeepSeek model or effort")
-        command = self._argv_codex(access, prompt, cwd, model, effort)
-        overrides = {
-            "model_provider": "deepseek",
-            "model_catalog_json": str(profile_directory() / "models.json"),
-            "model_providers.deepseek.name": "DeepSeek",
-            "model_providers.deepseek.base_url": "https://api.deepseek.com",
-            "model_providers.deepseek.env_key": "DEEPSEEK_API_KEY",
-            "model_providers.deepseek.wire_api": "responses",
-            "model_providers.deepseek.requires_openai_auth": False,
-            "model_providers.deepseek.supports_websockets": False,
-        }
-        position = command.index("exec")
-        arguments = []
-        for key, value in overrides.items():
-            arguments.extend(["--config", f"{key}={json.dumps(value)}"])
-        return [*command[:position], *arguments, *command[position:]]
+        model, effort = model_defaults(model, effort)
+        return apply_codex_profile(self._argv_codex(access, prompt, cwd, model, effort))
 
     def _argv_claude(
         self,
@@ -548,9 +531,13 @@ class Provider:
             if self.name == "gemini":
                 record_gemini_usage(stdout)
             usage = parse_provider_usage(self.name, stdout, model)
-            failure = codex_failure(stdout, self.name) if uses_stdin else {}
-            if failure.get("error_message"):
-                stderr = (stderr.rstrip() + "\n" + failure["error_message"]).lstrip()
+            failure = codex_failure(stdout) if uses_stdin else None
+            if failure is not None:
+                if self.name == "deepseek":
+                    from .deepseek_errors import classify_failure
+
+                    failure = classify_failure(failure)
+                stderr = (stderr.rstrip() + "\n" + failure.error_message).lstrip()
             stdout = _final_output(self.name, stdout)
             duration = time.monotonic() - start
             kind = classify_error(
@@ -562,7 +549,10 @@ class Provider:
             return ProviderResult(
                 self.name, redacted_command, stdout, stderr,
                 process.returncode, duration,
-                usage=usage, **{"error_kind": kind, **failure},
+                usage=usage, error_kind=(failure.error_kind or kind) if failure else kind,
+                error_message=failure.error_message if failure else None,
+                http_status=failure.http_status if failure else None,
+                retry_after_seconds=failure.retry_after_seconds if failure else None,
             )
         except TimeoutError as exc:
             redacted_command = [_redact_values(part, secret_values) for part in command]

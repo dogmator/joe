@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from .models import ProviderResult
+from .provider_registry import get_provider_spec
 
 _COOLDOWN_SECONDS = {
     "quota": 10 * 60,
@@ -24,7 +25,7 @@ def record_result(result: ProviderResult) -> None:
             _details.pop(result.provider, None)
             return
         duration = _COOLDOWN_SECONDS.get(result.error_kind or "")
-        indefinite = result.provider == "deepseek" and result.error_kind in {
+        indefinite = get_provider_spec(result.provider).quota_kind == "balance" and result.error_kind in {
             "authentication", "insufficient_balance", "rate_limit",
         }
         if indefinite:
@@ -79,7 +80,7 @@ def apply_cooldowns(statuses: list[dict[str, Any]]) -> list[dict[str, Any]]:
             item["cooldown_seconds"] = remaining
             item.update(error_kind=kind, http_status=detail.get("http_status"),
                         error_message=detail.get("message"), retry_at=detail.get("retry_at"))
-            if item.get("provider") == "deepseek":
+            if get_provider_spec(str(item.get("provider", ""))).quota_kind == "balance":
                 item["windows"] = []
             message = str(detail.get("message") or kind)
             item["message"] = (
